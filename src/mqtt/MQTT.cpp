@@ -152,7 +152,7 @@ inline void onReceiveProto(char *topic, byte *payload, size_t length)
     p->hop_limit = e.packet->hop_limit;
     p->hop_start = e.packet->hop_start;
     p->want_ack = e.packet->want_ack;
-    p->via_mqtt = true;       // Mark that the packet was received via MQTT
+    p->via_mqtt = false;       // Mark that the packet was received via MQTT
     p->pki_encrypted = false; // Only local AES-CCM decryption may establish PKI authentication.
     p->transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MQTT;
     p->which_payload_variant = e.packet->which_payload_variant;
@@ -783,7 +783,7 @@ void MQTT::perhapsReportToMap()
 
     // Coerce the map position precision to be within the valid range
     // This removes obtusely large radius and privacy problematic ones from the map
-    if (map_position_precision < 12 || map_position_precision > 15) {
+    if (map_position_precision < 12 || map_position_precision > 40) {
         LOG_WARN("MQTT Map report position precision %u is out of range, using default %u", map_position_precision,
                  default_map_position_precision);
         map_position_precision = default_map_position_precision;

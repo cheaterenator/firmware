@@ -39,7 +39,7 @@
 enum class TrafficType { POSITION, TELEMETRY };
 
 // Traffic management defaults
-#define default_traffic_mgmt_position_precision_bits 19                // ~90m grid cells (±45m)
+#define default_traffic_mgmt_position_precision_bits 32                // ~90m grid cells (±45m)
 #define default_traffic_mgmt_position_min_interval_secs (11 * 60 * 60) // 11 hours between identical positions
 // Role cap: tracker-role origins may refresh a duplicate position this often (vs the 11h default).
 #define default_traffic_mgmt_tracker_position_min_interval_secs (60 * 60) // 1 hour
@@ -57,7 +57,7 @@ enum class TrafficType { POSITION, TELEMETRY };
 #ifdef USERPREFS_RINGTONE_NAG_SECS
 #define default_ringtone_nag_secs USERPREFS_RINGTONE_NAG_SECS
 #else
-#define default_ringtone_nag_secs 15
+#define default_ringtone_nag_secs 1
 #endif
 #define default_network_ipv6_enabled false
 

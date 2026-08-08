@@ -69,6 +69,8 @@ std::vector<meshtastic_FileInfo> getFiles(const char *dirname, uint8_t levels, s
 void listDir(const char *dirname, uint8_t levels, bool del = false);
 void rmDir(const char *dirname);
 void setupSDCard();
+size_t calculateNRF5xUsedBytes(); 
+size_t getNRF5xTotalBytes();
 
 #if defined(HAS_SDCARD) && !defined(SDCARD_USE_SOFT_SPI) && defined(SDCARD_USE_SPI1)
 #include <SPI.h>

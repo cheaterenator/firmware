@@ -63,7 +63,20 @@ bool ReliableRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
             LOG_DEBUG("Generate implicit ack");
             // NOTE: we do NOT check p->wantAck here because p is the INCOMING rebroadcast and that packet is not expected to be
             // marked as wantAck
-            sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, old->packet->channel);
+            //
+            // We build this locally-delivered ack ourselves (instead of using the generic sendAckNak()
+            // helper) so we can copy relay_node from the overheard rebroadcast onto it. sendAckNak()
+            // builds a fresh packet with no way to pass that through, and this ack never actually
+            // transmits over radio (it's delivered to ourselves), so it would otherwise never get a
+            // relay_node value at all.
+            meshtastic_MeshPacket *implicitAck =
+                routingModule->allocAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, old->packet->channel);
+            if (implicitAck) {
+                implicitAck->relay_node = p->relay_node;
+                implicitAck->want_ack = false;
+                if (sendLocal(implicitAck) == ERRNO_SHOULD_RELEASE)
+                    packetPool.release(implicitAck);
+            }
 
             // Only stop retransmissions if the rebroadcast came via LoRa
             if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA) {

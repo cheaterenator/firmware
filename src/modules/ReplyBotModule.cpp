@@ -116,6 +116,28 @@ ProcessMessage ReplyBotModule::handleReceived(const meshtastic_MeshPacket &mp)
         return ProcessMessage::CONTINUE;
     }
 
+    // Determine which specific command matched (isCommand() only tells us "yes/no"),
+    // so we can vary both the reply text and whether signal diagnostics get appended.
+    // Same whitespace-skip as isCommand() uses.
+    const char *cmdStart = buf;
+    while (*cmdStart == ' ' || *cmdStart == '\t')
+        cmdStart++;
+
+    const char *replyLabel;
+    bool includeDiagnostics = true;
+    if (strncmp(cmdStart, "/ping", 5) == 0) {
+        replyLabel = "pong!";
+    } else if (strncmp(cmdStart, "/test", 5) == 0) {
+        replyLabel = "Działa, je\xc5\x9bli chcesz lepiej przetestowa\xc4\x87 \xc5\x82ączno\xc5\x9b\xc4\x87, wprowad\xc5\xba komend\xc4\x99 scyzoryk pomoc";
+        includeDiagnostics = false;
+    } else if (strncmp(cmdStart, "/hello", 6) == 0) {
+        replyLabel = "Witaj w \xc5\x9awi\xc4\x99tokrzyskim! Zapraszam do odwiedzenia strony https://meshtastic-swietokrzyskie.pl";
+        includeDiagnostics = false;
+    } else {
+        replyLabel = "OK"; // nie powinno się zdarzyć - isCommand() już odfiltrował
+        includeDiagnostics = false;
+    }
+
     // Apply rate limiting per sender depending on DM/broadcast
     const uint32_t cooldownMs = isDM ? REPLYBOT_DM_COOLDOWN_MS : REPLYBOT_LF_COOLDOWN_MS;
     if (replybotRateLimited(mp.from, cooldownMs)) {
@@ -138,7 +160,11 @@ ProcessMessage ReplyBotModule::handleReceived(const meshtastic_MeshPacket &mp)
 
     // Build the reply message and send it back via DM
     char reply[96];
-    snprintf(reply, sizeof(reply), "🎙️ Mic Check : %d Hops away | RSSI %d | SNR %.1f", hopsAway, rssi, snr);
+    if (includeDiagnostics) {
+        snprintf(reply, sizeof(reply), "%s | %d Skok(-ow) | RSSI %d | SNR %.1f", replyLabel, hopsAway, rssi, snr);
+    } else {
+        snprintf(reply, sizeof(reply), "%s", replyLabel);
+    }
     sendDm(mp, reply);
     return ProcessMessage::CONTINUE;
 }

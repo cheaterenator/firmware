@@ -84,6 +84,8 @@
 #include "modules/GenericThreadModule.h"
 #endif
 
+#include "modules/SignalReplyModule.h"
+
 #ifdef ARCH_ESP32
 #if defined(USE_SX1280) && !MESHTASTIC_EXCLUDE_AUDIO
 #include "modules/esp32/AudioModule.h"
@@ -283,5 +285,6 @@ void setupModules()
 #endif
     // NOTE! This module must be added LAST because it likes to check for replies from other modules and avoid sending extra
     // acks
+	signalReplyModule = new SignalReplyModule();
     routingModule = new RoutingModule();
 }

@@ -259,6 +259,15 @@ ScanI2C::FoundDevice rgb_found = ScanI2C::FoundDevice(ScanI2C::DeviceType::NONE,
 /// The I2C address of our Air Quality Indicator (if found)
 ScanI2C::DeviceAddress aqi_found = ScanI2C::ADDRESS_NONE;
 
+uint64_t busyHistory[60] = {0};
+ 		int      currentIndex    = 0;
+ 		uint64_t lastBusyUs      = 0;
+ 		uint32_t lastCheckMs     = 0;
+ 		bool     initialized     = false;
+ 		uint32_t CpuHwUsagePercent = 0;
+
+
+
 #ifdef HAS_DRV2605
 Adafruit_DRV2605 drv;
 #endif
@@ -276,6 +285,60 @@ bool pmu_found;
 // Array map of sensor types with i2c address and wire as we'll find in the i2c scan
 std::pair<uint8_t, TwoWire *> nodeTelemetrySensorsMap[_meshtastic_TelemetrySensorType_MAX + 1] = {};
 #endif
+
+void startBusy()
+ 		{
+ 		    if (++g_busyCounter == 1) {
+ 		        g_lastBusyStartUs = micros();
+ 		        g_isBusy = true;
+ 		    }
+ 		}
+ 		 
+ 		void endBusy()
+ 		{
+ 		    if (g_busyCounter <= 0) {
+ 		        g_busyCounter = 0;
+ 		        return;
+ 		    }
+ 		 
+ 		    if (--g_busyCounter == 0) {
+ 		        uint64_t now = micros();
+ 		        g_totalBusyTimeUs += (now - g_lastBusyStartUs);
+ 		        g_isBusy = false;
+ 		    }
+ 		}
+ 		 
+ 		uint64_t getTotalBusyTimeUs()
+ 		{
+ 		    if (g_isBusy) {
+ 		        uint64_t now = micros();
+ 		        return g_totalBusyTimeUs + (now - g_lastBusyStartUs);
+ 		    } else {
+ 		        return g_totalBusyTimeUs;
+ 		    }
+ 		}
+ 		 
+ 		void updateCpuUsageStats()
+ 		{
+ 		    uint64_t currentBusy = getTotalBusyTimeUs();
+ 		    uint64_t deltaUs     = currentBusy - lastBusyUs;
+ 		    lastBusyUs           = currentBusy;
+ 		 
+ 		    busyHistory[currentIndex] = deltaUs;
+ 		    currentIndex = (currentIndex + 1) % 60;
+ 		 
+ 		    uint64_t sumBusyUs = 0;
+ 		    for (int i = 0; i < 60; i++) {
+ 		        sumBusyUs += busyHistory[i];
+ 		    }
+ 		 
+ 		    CpuHwUsagePercent = ( (float)sumBusyUs / (60.0f * 1000000.0f) ) * 100.0f;
+ 		}
+		
+
+
+        
+
 
 Router *router = NULL; // Users of router don't care what sort of subclass implements that API
 

@@ -282,6 +282,7 @@ Import("projenv")
 prefsLoc = projenv["PROJECT_DIR"] + "/version.properties"
 verObj = readProps(prefsLoc)
 print(f"Using meshtastic platformio-custom.py, firmware version {verObj['long']} on {env.get('PIOENV')}")
+#verObj["long"] = verObj["long"] + "_MTSW"
 
 # get repository owner if git is installed
 try:

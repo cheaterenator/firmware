@@ -679,8 +679,16 @@ void RadioLibInterface::handleReceiveInterrupt()
             mp->want_ack = !!(radioBuffer.header.flags & PACKET_FLAGS_WANT_ACK_MASK);
             mp->via_mqtt = !!(radioBuffer.header.flags & PACKET_FLAGS_VIA_MQTT_MASK);
             // If hop_start is not set, next_hop and relay_node are invalid (firmware <2.3)
-            mp->next_hop = mp->hop_start == 0 ? NO_NEXT_HOP_PREFERENCE : radioBuffer.header.next_hop;
-            mp->relay_node = mp->hop_start == 0 ? NO_RELAY_NODE : radioBuffer.header.relay_node;
+            // mp->next_hop = mp->hop_start == 0 ? NO_NEXT_HOP_PREFERENCE : radioBuffer.header.next_hop;
+            //mp->relay_node = mp->hop_start == 0 ? NO_RELAY_NODE : radioBuffer.header.relay_node;
+			// If hop_start is not set, next_hop is invalid (firmware <2.3). relay_node is different: it's
+			// always set by the transmitting node right before every single send(), regardless of
+			// hop_limit/hop_start (see Router::send(), NextHopRouter::send(), FloodingRouter::send()) —
+			// trust it directly instead of discarding it whenever hop_start==0, since that also throws
+			// away valid relay info from the many deliberately-0-hop ACK packets (e.g. ReliableRouter's
+			// "stop retransmitting" acks), which is most ACKs in normal operation.
+			mp->next_hop = mp->hop_start == 0 ? NO_NEXT_HOP_PREFERENCE : radioBuffer.header.next_hop;
+			mp->relay_node = radioBuffer.header.relay_node;
 
             addReceiveMetadata(mp);
 

@@ -499,7 +499,14 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
 #if !MESHTASTIC_EXCLUDE_MQTT
         // Only publish to MQTT if we're the original transmitter of the packet
         if (moduleConfig.mqtt.enabled && isFromUs(p) && mqtt && p_decoded) {
-            mqtt->onSend(*p, *p_decoded, chIndex);
+            // Only publish to MQTT only public messages
+            if(!(p_decoded->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP &&
+                p_decoded->to != 0xffffffff))
+            {
+                mqtt->onSend(*p, *p_decoded, chIndex);
+            }else{
+                LOG_DEBUG("MQTT secured messages enabled, message was not forwarded to broker\n");
+            }
         }
 #endif
         packetPool.release(p_decoded);
@@ -949,6 +956,41 @@ DecodeState perhapsDecode(meshtastic_MeshPacket *p)
             }
         }
     }
+
+
+#if HAS_UDP_MULTICAST
+ 		    // Fallback: for UDP multicast, try default preset names with default PSK if normal channel match failed
+ 		    if (!decrypted && p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP) {
+ 		        if (channels.setDefaultPresetCryptoForHash(p->channel)) {
+ 		            memcpy(bytes, p->encrypted.bytes, rawSize);
+ 		            crypto->decrypt(p->from, p->id, rawSize, bytes);
+ 		 
+ 		            meshtastic_Data decodedtmp;
+ 		            memset(&decodedtmp, 0, sizeof(decodedtmp));
+ 		            if (pb_decode_from_bytes(bytes, rawSize, &meshtastic_Data_msg, &decodedtmp) &&
+ 		                decodedtmp.portnum != meshtastic_PortNum_UNKNOWN_APP) {
+ 		                p->decoded = decodedtmp;
+ 		                p->which_payload_variant = meshtastic_MeshPacket_decoded_tag;
+ 		                // Map to our local default channel index (name+PSK default), not necessarily primary
+ 		                ChannelIndex defaultIndex = channels.getPrimaryIndex();
+ 		                for (ChannelIndex i = 0; i < channels.getNumChannels(); ++i) {
+ 		                    if (channels.isDefaultChannel(i)) {
+ 		                        defaultIndex = i;
+ 		                        break;
+ 		                    }
+ 		                }
+ 		                chIndex = defaultIndex;
+ 		                decrypted = true;
+ 		            } else {
+ 		                LOG_WARN("UDP fallback decode attempted but failed for hash 0x%x", p->channel);
+ 		            }
+ 		}
+    }
+#endif
+
+
+
+
 
     if (decrypted) {
         // parsing was successful

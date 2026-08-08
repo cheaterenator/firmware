@@ -503,19 +503,19 @@ NodeDB::NodeDB()
 
     // If we are setup to broadcast on any default channel slot (with default frequency slot semantics),
     // ensure that the telemetry intervals are coerced to the role-aware minimum value.
-    if (channels.hasDefaultChannel()) {
-        LOG_DEBUG("Coerce telemetry to role-aware minimum on defaults");
-        moduleConfig.telemetry.device_update_interval = Default::getConfiguredOrMinimumValue(
-            moduleConfig.telemetry.device_update_interval, min_default_telemetry_interval_secs);
-        moduleConfig.telemetry.environment_update_interval = Default::getConfiguredOrMinimumValue(
-            moduleConfig.telemetry.environment_update_interval, min_default_telemetry_interval_secs);
-        moduleConfig.telemetry.air_quality_interval = Default::getConfiguredOrMinimumValue(
-            moduleConfig.telemetry.air_quality_interval, min_default_telemetry_interval_secs);
-        moduleConfig.telemetry.power_update_interval = Default::getConfiguredOrMinimumValue(
-            moduleConfig.telemetry.power_update_interval, min_default_telemetry_interval_secs);
-        moduleConfig.telemetry.health_update_interval = Default::getConfiguredOrMinimumValue(
-            moduleConfig.telemetry.health_update_interval, min_default_telemetry_interval_secs);
-    }
+   // if (channels.hasDefaultChannel()) {
+    //    LOG_DEBUG("Coerce telemetry to role-aware minimum on defaults");
+    //   moduleConfig.telemetry.device_update_interval = Default::getConfiguredOrMinimumValue(
+    //        moduleConfig.telemetry.device_update_interval, min_default_telemetry_interval_secs);
+    //    moduleConfig.telemetry.environment_update_interval = Default::getConfiguredOrMinimumValue(
+    //        moduleConfig.telemetry.environment_update_interval, min_default_telemetry_interval_secs);
+    //    moduleConfig.telemetry.air_quality_interval = Default::getConfiguredOrMinimumValue(
+    //        moduleConfig.telemetry.air_quality_interval, min_default_telemetry_interval_secs);
+    //    moduleConfig.telemetry.power_update_interval = Default::getConfiguredOrMinimumValue(
+    //        moduleConfig.telemetry.power_update_interval, min_default_telemetry_interval_secs);
+    //    moduleConfig.telemetry.health_update_interval = Default::getConfiguredOrMinimumValue(
+     //       moduleConfig.telemetry.health_update_interval, min_default_telemetry_interval_secs);
+    //}
     // Enforce position broadcast minimums if we would send positions over a default channel
     // Check channels the same way PositionModule::sendOurPosition() does - first channel with position_precision set
     bool positionUsesDefaultChannel = false;
