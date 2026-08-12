@@ -611,7 +611,7 @@ class AnalogBatteryLevel : public HasBatteryLevel
             return getINACurrent() > 0;
 #else
             // return getINACurrent() < 0;
-		    return getINACurrent() > 0;
+		    return getINACurrent() < 0;
 #endif
         }
         return isBatteryConnect() && isVbusIn();

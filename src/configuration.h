@@ -402,6 +402,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define DEFAULT_REBOOT_SECONDS 7
 #endif
 
+#ifndef AUTO_REBOOT_INTERVAL_SECS
+// Compile-time interval for AutoRebootThread's periodic self-reboot. 0 disables it.
+// Default: 24h. Can be raised up to ~49 days (see AUTO_REBOOT_MAX_INTERVAL_SECS in
+// AutoRebootThread.h) - e.g. (30UL * 24 * 60 * 60) for a 30-day/~1-month interval.
+#define AUTO_REBOOT_INTERVAL_SECS (24UL * 60 * 60)
+// #define AUTO_REBOOT_INTERVAL_SECS (60 * 60)
+#endif
+
 #ifndef DEFAULT_SHUTDOWN_SECONDS
 #define DEFAULT_SHUTDOWN_SECONDS 2
 #endif

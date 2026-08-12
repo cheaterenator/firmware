@@ -406,6 +406,8 @@ void nrf52Setup()
     // per
     // https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.nrf52832.ps.v1.1%2Fpower.html
     LOG_DEBUG("Reset reason: 0x%x", why);
+    if (why & POWER_RESETREAS_DOG_Msk)
+        LOG_WARN("Rebooted by watchdog!");
 
 #ifdef USE_SEMIHOSTING
     nrf52InitSemiHosting();

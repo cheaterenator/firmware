@@ -160,7 +160,9 @@ void printPartitionTable()
 #endif // ARCH_ESP32
 
 #include "AmbientLightingThread.h"
+#include "AutoRebootThread.h"
 #include "PowerFSMThread.h"
+#include "WatchdogTestThread.h"
 
 #if !defined(ARCH_STM32WL) && !MESHTASTIC_EXCLUDE_I2C && !MESHTASTIC_EXCLUDE_ACCELEROMETER
 #include "motion/AccelerometerThread.h"
@@ -366,6 +368,10 @@ uint32_t timeLastPowered = 0;
 
 static OSThread *powerFSMthread;
 AmbientLightingThread *ambientLightingThread;
+AutoRebootThread *autoRebootThread;
+#if WATCHDOG_TEST_ENABLED
+WatchdogTestThread *watchdogTestThread;
+#endif
 
 RadioLibHal *RadioLibHAL = NULL;
 
@@ -1122,6 +1128,14 @@ void setup()
 #endif
 
     nodeStatus->observe(&nodeDB->newStatus);
+
+#if !MESHTASTIC_EXCLUDE_AUTO_REBOOT
+    autoRebootThread = new AutoRebootThread();
+#endif
+
+#if WATCHDOG_TEST_ENABLED
+    watchdogTestThread = new WatchdogTestThread();
+#endif
 
 #ifdef HAS_I2S
     LOG_DEBUG("Start audio thread");
