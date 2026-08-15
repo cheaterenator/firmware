@@ -318,7 +318,7 @@ PacketId generatePacketId()
 RxTimeStamp computeRxTimeStamp()
 {
     const bool haveTime = getRTCQuality() >= RTCQualityFromNet;
-    return {haveTime ? getValidTime(RTCQualityFromNet) : Time::getMillis(), haveTime};
+    return {haveTime ? getValidTime(RTCQualityFromNet) : Time::getUptimeSecs(), haveTime};
 }
 
 void stampRxTime(meshtastic_MeshPacket *p)
@@ -1653,6 +1653,12 @@ void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
         return;
     }
     if (authVerdict == RoutingAuthVerdict::OPAQUE_RELAY_ONLY) {
+        // A packet we originated but cannot decrypt (a PKI DM we sent, overheard being rebroadcast)
+        // is opaque to us and would otherwise skip shouldFilterReceived entirely, so the implicit
+        // ACK that marks a DM "Delivered to mesh" never fires. The ACK is header-only (from/id), so
+        // generate it here from the still-encrypted packet before opaque relay.
+        if (isFromUs(p))
+            perhapsGenerateImplicitAckForOwnOverheard(p);
         relayOpaquePacket(p);
         packetPool.release(p);
         return;

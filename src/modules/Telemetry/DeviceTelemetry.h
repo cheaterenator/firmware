@@ -5,7 +5,6 @@
 #include "ProtobufModule.h"
 #include <OLEDDisplay.h>
 #include <OLEDDisplayUi.h>
-#include "FSCommon.h"
 
 class DeviceTelemetryModule : private concurrency::OSThread,
                               public BaseTelemetryModule,
@@ -19,8 +18,6 @@ class DeviceTelemetryModule : private concurrency::OSThread,
         : concurrency::OSThread("DeviceTelemetry"),
           ProtobufModule("DeviceTelemetry", meshtastic_PortNum_TELEMETRY_APP, &meshtastic_Telemetry_msg)
     {
-        uptimeWrapCount = 0;
-        uptimeLastMs = millis();
         nodeStatusObserver.observe(&nodeStatus->onNewStatus);
         setIntervalFromNow(setStartDelay()); // Wait until NodeInfo is sent
     }
@@ -38,35 +35,12 @@ class DeviceTelemetryModule : private concurrency::OSThread,
      */
     bool sendTelemetry(NodeNum dest = NODENUM_BROADCAST, bool phoneOnly = false);
 
-    /**
-     * Get the uptime in seconds
-     * Loses some accuracy after 49 days, but that's fine
-     */
-    uint32_t getUptimeSeconds() { return (0xFFFFFFFF / 1000) * uptimeWrapCount + (uptimeLastMs / 1000); }
-
   private:
     meshtastic_Telemetry getDeviceTelemetry();
     meshtastic_Telemetry getLocalStatsTelemetry();
-    meshtastic_Telemetry getLocalStatsExtendedTelemetry();
 
     void sendLocalStatsToPhone();
-    void sendLocalStatsToMesh();
-	void sendLocalStatsExtendedToMesh();
     uint32_t sendToPhoneIntervalMs = SECONDS_IN_MINUTE * 1000;           // Send to phone every minute
     uint32_t sendStatsToPhoneIntervalMs = 15 * SECONDS_IN_MINUTE * 1000; // Send stats to phone every 15 minutes
     uint32_t lastSentStatsToPhone = 0;
-    bool statsHaveBeenSent = false;
-
-    void refreshUptime()
-    {
-        auto now = millis();
-        // If we wrapped around (~49 days), increment the wrap count
-        if (now < uptimeLastMs)
-            uptimeWrapCount++;
-
-        uptimeLastMs = now;
-    }
-
-    uint32_t uptimeWrapCount;
-    uint32_t uptimeLastMs;
 };
