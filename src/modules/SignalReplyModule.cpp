@@ -25,7 +25,7 @@ ProcessMessage SignalReplyModule::handleReceived(const meshtastic_MeshPacket &cu
 
     //This condition is meant to reply to message containing request "pinger"
 
-    if ( ( receivedMessage  == "pinger" || receivedMessage  == "Pinger" ) && currentRequest.from != 0x0 && currentRequest.from != nodeDB->getNodeNum())
+    if ( ( receivedMessage  == "pingunr" || receivedMessage  == "Pingunr" ) && currentRequest.from != 0x0 && currentRequest.from != nodeDB->getNodeNum())
     {
         int hopLimit = currentRequest.hop_limit;
         int hopStart = currentRequest.hop_start;

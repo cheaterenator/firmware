@@ -27,8 +27,8 @@
   // "USERPREFS_EVENT_MODE_HOP_LIMIT": "3", // Event-mode default and firmware-generated/relay hop cap (0-7; default 3)
   // "USERPREFS_BLOCK_POSITION_ON_EVENT_CHANNEL": "1", // Block location TX + discard inbound location on channels keyed with USERPREFS_CHANNEL_0_PSK. Defaults off, and must be set explicitly.
   // "USERPREFS_TMM_APPLY_TO_PRIVATE_CHANNELS": "1", // Extend TMM position dedup and precision clamping to private/custom-key channels (default: well-known channels only)
-   "USERPREFS_FIRMWARE_EDITION": "meshtastic_FirmwareEdition_DIY_EDITION",
-   "USERPREFS_FIXED_BLUETOOTH": "123456",
+"USERPREFS_FIRMWARE_EDITION": "meshtastic_FirmwareEdition_DIY_EDITION",
+"USERPREFS_FIXED_BLUETOOTH": "653247",
   // "USERPREFS_FIXED_GPS": "",
   // "USERPREFS_FIXED_GPS_ALT": "0",
   // "USERPREFS_FIXED_GPS_LAT": "48.85873920",
@@ -36,8 +36,8 @@
   // "USERPREFS_CONFIG_SMART_POSITION_ENABLED": "false",
   // "USERPREFS_CONFIG_GPS_UPDATE_INTERVAL": "600",
   // "USERPREFS_CONFIG_POSITION_BROADCAST_INTERVAL": "1800",
-  // "USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL": "900", // Device telemetry update interval in seconds
-  // "USERPREFS_CONFIG_ENV_TELEM_UPDATE_INTERVAL": "900",     // Environment telemetry update interval in seconds
+  "USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL": "7200", // Device telemetry update interval in seconds
+  "USERPREFS_CONFIG_ENV_TELEM_UPDATE_INTERVAL": "3600",     // Environment telemetry update interval in seconds
   // "USERPREFS_CONFIG_ENVIRONMENT_MEASUREMENT_ENABLED": "1", // Force BMP280/sensor reads + LoRa broadcast on first boot
   // "USERPREFS_CONFIG_ENV_SCREEN_SCREEN_ENABLED": "1",      // Environment telemetry enable on screen
   // "USERPREFS_CONFIG_AQ_TELEM_UPDATE_INTERVAL": "900",     // AQ telemetry update interval in seconds
@@ -45,10 +45,10 @@
   // "USERPREFS_CONFIG_AQ_SCREEN_ENABLED": "1",              // AQ telemetry enable on screen
   // "USERPREFS_LORACONFIG_CHANNEL_NUM": "31",
   // "USERPREFS_LORACONFIG_TX_POWER": "0",
-   "USERPREFS_LORACONFIG_MODEM_PRESET": "meshtastic_Config_LoRaConfig_ModemPreset_NARROW_FAST",
+  "USERPREFS_LORACONFIG_MODEM_PRESET": "meshtastic_Config_LoRaConfig_ModemPreset_NARROW_FAST",
   // "USERPREFS_CONFIG_SECURITY_PACKET_SIGNATURE_POLICY": "meshtastic_Config_SecurityConfig_PacketSignaturePolicy_PACKET_SIGNATURE_POLICY_BALANCED", // Authenticity policy applied to remotely received packets.
-   //"USERPREFS_USE_ADMIN_KEY_0": "{ 0x4d, 0xbd, 0xb4, 0x29, 0x91, 0x51, 0x51, 0x01, 0x35, 0xd2, 0xf1, 0xb1, 0x95, 0x51, 0x18, 0x46, 0x93, 0x65, 0x7d, 0x2d, 0x1c, 0x49, 0x42, 0x51, 0x30, 0x73, 0xc5, 0x81, 0x00, 0x28, 0xed, 0x05 }",
-   //"USERPREFS_USE_ADMIN_KEY_1": "{ 0x64, 0x11, 0xb4, 0xf9, 0xea, 0xec, 0xf9, 0xfd, 0x70, 0x50, 0xd9, 0x77, 0x07, 0x8b, 0x9b, 0xaa, 0x09, 0x59, 0xd9, 0xbd, 0x0d, 0xc7, 0x51, 0x1f, 0xbd, 0x1e, 0x6e, 0x9c, 0xca, 0x85, 0x08, 0x77 }",
+  "USERPREFS_USE_ADMIN_KEY_0": "{ 0x4d, 0xbd, 0xb4, 0x29, 0x91, 0x51, 0x51, 0x01, 0x35, 0xd2, 0xf1, 0xb1, 0x95, 0x51, 0x18, 0x46, 0x93, 0x65, 0x7d, 0x2d, 0x1c, 0x49, 0x42, 0x51, 0x30, 0x73, 0xc5, 0x81, 0x00, 0x28, 0xed, 0x05 }",
+  "USERPREFS_USE_ADMIN_KEY_1": "{ 0x64, 0x11, 0xb4, 0xf9, 0xea, 0xec, 0xf9, 0xfd, 0x70, 0x50, 0xd9, 0x77, 0x07, 0x8b, 0x9b, 0xaa, 0x09, 0x59, 0xd9, 0xbd, 0x0d, 0xc7, 0x51, 0x1f, 0xbd, 0x1e, 0x6e, 0x9c, 0xca, 0x85, 0x08, 0x77 }",
   // "USERPREFS_USE_ADMIN_KEY_2": "{}",
   // "USERPREFS_OEM_TEXT": "Caterham Car Club",
   // "USERPREFS_OEM_FONT_SIZE": "0",
