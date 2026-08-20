@@ -82,6 +82,17 @@ class GPSStatus : public Status
         }
     }
 
+    // Whether getAltitude() reflects a real, known altitude (a fixed position with an altitude
+    // set, or a current GPS fix that reports one) rather than the default 0 it returns otherwise.
+    bool hasValidAltitude() const
+    {
+        if (config.position.fixed_position) {
+            return localPosition.has_altitude;
+        } else {
+            return hasLock && p.has_altitude;
+        }
+    }
+
     uint32_t getDOP() const { return p.PDOP; }
 
     uint32_t getHeading() const { return p.ground_track; }

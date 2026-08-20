@@ -132,7 +132,7 @@
 // same, but you would get a wider angle of coverage. Also take insertion loss and possibly VSWR into account
 // (https://www.everythingrf.com/tech-resources/vswr). Please check regulations yourself and check airtime, usage (for example
 // whether you are airborne), frequency, and power laws.
-#define SX126X_MAX_POWER 22 // SX126xInterface.cpp defaults to 22 if not defined, but here we define it for good practice
+#define SX126X_MAX_POWER 20 // SX126xInterface.cpp defaults to 22 if not defined, but here we define it for good practice
 
 // Display
 // FIXME: change behavior in src to default to not having screen if is undefined

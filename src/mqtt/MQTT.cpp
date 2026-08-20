@@ -706,6 +706,14 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
         return;
     }
 #endif
+// Never uplink a packet addressed to a specific node (a DM) to MQTT, regardless of channel
+    // uplink settings or PKI status. Only broadcasts (telemetry, position, public channel chat)
+    // should ever reach the broker. Without this, a DM sent TO us - which we've already decrypted
+    // locally to show on screen - gets republished in plaintext the moment our node acts as gateway.
+    if (!isBroadcast(mp_decoded.to)) {
+        LOG_DEBUG("MQTT onSend - Suppress private (non-broadcast) packet from uplink");
+        return;
+    }
     bool uplinkEnabled = false;
     for (int i = 0; i <= 7; i++) {
         if (channels.getByIndex(i).settings.uplink_enabled)

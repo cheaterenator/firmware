@@ -5,6 +5,7 @@
 #include "../mesh/generated/meshtastic/telemetry.pb.h"
 #include "Default.h"
 #include "EnvironmentTelemetry.h"
+#include "GPSStatus.h"
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "Power.h"
@@ -695,6 +696,16 @@ bool EnvironmentTelemetryModule::getEnvironmentTelemetry(meshtastic_Telemetry *m
         get_metrics = sensor->getMetrics(m); // avoid short-circuit evaluation rules
         valid = valid || get_metrics;
         hasSensor = true;
+    }
+
+    // Reduce the raw station pressure to an equivalent sea-level value when we actually know our
+    // altitude (fixed position with an altitude set, or a current GPS fix). Otherwise leave the
+    // sensor's raw reading untouched, as before.
+    if (m->variant.environment_metrics.has_barometric_pressure && gpsStatus && gpsStatus->hasValidAltitude()) {
+        const float referenceTempC =
+            m->variant.environment_metrics.has_temperature ? m->variant.environment_metrics.temperature : 15.0f;
+        m->variant.environment_metrics.barometric_pressure = UnitConversions::PressureAtSeaLevel(
+            m->variant.environment_metrics.barometric_pressure, referenceTempC, gpsStatus->getAltitude());
     }
 
 #ifndef T1000X_SENSOR_EN
