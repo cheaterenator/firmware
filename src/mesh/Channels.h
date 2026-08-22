@@ -110,7 +110,12 @@ class Channels
 
     bool ensureLicensedOperation();
 
-    bool setDefaultPresetCryptoForHash(ChannelHash channelHash);
+    // Bridge fallback for decryptForHash(): tries the default PSK against each preset name listed in
+    // mesh/udp/UdpBridgePresets.h (instead of every known preset) and, on a match, sets up crypto for
+    // it. Always declared; the body is a no-op returning false unless UDP_PRESET_BRIDGE is enabled for
+    // this build, so callers don't need their own ifdef. See Router.cpp's UDP multicast decode fallback
+    // for the only caller.
+    bool setBridgePresetCryptoForHash(ChannelHash channelHash);
 
     /**
      * Validate a channel, fixing any errors as needed

@@ -121,7 +121,10 @@ class UdpMulticastHandler final
         }
 #endif
         if (mp->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP) {
-            LOG_ERROR("Attempt to send UDP sourced packet over UDP");
+            // Don't echo a packet back onto the multicast group it just arrived from - every other
+            // listener (including whoever sent it) already has it, so this is a pure duplicate.
+            LOG_DEBUG("Not re-broadcasting UDP-sourced packet over UDP (id=%u)", mp->id);
+            return false;
         }
         LOG_DEBUG("Broadcasting packet over UDP (id=%u)", mp->id);
         uint8_t buffer[meshtastic_MeshPacket_size];

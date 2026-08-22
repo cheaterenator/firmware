@@ -292,7 +292,7 @@ std::pair<uint8_t, TwoWire *> nodeTelemetrySensorsMap[_meshtastic_TelemetrySenso
 void startBusy()
  		{
  		    if (++g_busyCounter == 1) {
- 		        g_lastBusyStartUs = micros();
+ 		        g_lastBusyStartUs = (uint32_t)micros();
  		        g_isBusy = true;
  		    }
  		}
@@ -305,8 +305,8 @@ void startBusy()
  		    }
  		 
  		    if (--g_busyCounter == 0) {
- 		        uint64_t now = micros();
- 		        g_totalBusyTimeUs += (now - g_lastBusyStartUs);
+ 		        const uint32_t now = (uint32_t)micros();
+				g_totalBusyTimeUs += (uint64_t)(now - g_lastBusyStartUs);
  		        g_isBusy = false;
  		    }
  		}
@@ -314,31 +314,57 @@ void startBusy()
  		uint64_t getTotalBusyTimeUs()
  		{
  		    if (g_isBusy) {
- 		        uint64_t now = micros();
- 		        return g_totalBusyTimeUs + (now - g_lastBusyStartUs);
+ 		        const uint32_t now = (uint32_t)micros();
+				return g_totalBusyTimeUs + (uint64_t)(now - g_lastBusyStartUs);
  		    } else {
  		        return g_totalBusyTimeUs;
  		    }
  		}
  		 
- 		void updateCpuUsageStats()
- 		{
- 		    uint64_t currentBusy = getTotalBusyTimeUs();
- 		    uint64_t deltaUs     = currentBusy - lastBusyUs;
- 		    lastBusyUs           = currentBusy;
- 		 
- 		    busyHistory[currentIndex] = deltaUs;
- 		    currentIndex = (currentIndex + 1) % 60;
- 		 
- 		    uint64_t sumBusyUs = 0;
- 		    for (int i = 0; i < 60; i++) {
- 		        sumBusyUs += busyHistory[i];
- 		    }
- 		 
- 		    CpuHwUsagePercent = ( (float)sumBusyUs / (60.0f * 1000000.0f) ) * 100.0f;
- 		}
+ 		//void updateCpuUsageStats()
+ 		//{
+ 		//    uint64_t currentBusy = getTotalBusyTimeUs();
+ 		//    uint64_t deltaUs     = currentBusy - lastBusyUs;
+ 		//    lastBusyUs           = currentBusy;
+ 		// 
+ 		//    busyHistory[currentIndex] = deltaUs;
+ 		//    currentIndex = (currentIndex + 1) % 60;
+ 	///	 
+ 	//	    uint64_t sumBusyUs = 0;
+ 	//	    for (int i = 0; i < 60; i++) {
+ 	//	        sumBusyUs += busyHistory[i];
+ 	//	    }
+ 	//	 
+ 	//	    CpuHwUsagePercent = ( (float)sumBusyUs / (60.0f * 1000000.0f) ) * 100.0f;
+ 	//
+//	}
 		
+void updateCpuUsageStats()
+{
+    uint64_t currentBusy = getTotalBusyTimeUs();
+    uint64_t deltaUs = currentBusy - lastBusyUs;
+    lastBusyUs = currentBusy;
 
+    // One sample should represent ~1s of wall time; clamp pathological values (e.g. stalled tick).
+    const uint64_t maxReasonableBusyUsPerSample = 5ULL * 1000000ULL;
+    if (deltaUs > maxReasonableBusyUsPerSample) {
+        deltaUs = maxReasonableBusyUsPerSample;
+    }
+
+    busyHistory[currentIndex] = deltaUs;
+    currentIndex = (currentIndex + 1) % 60;
+
+    uint64_t sumBusyUs = 0;
+    for (int i = 0; i < 60; i++) {
+        sumBusyUs += busyHistory[i];
+    }
+
+    float pct = ((float)sumBusyUs / (60.0f * 1000000.0f)) * 100.0f;
+    if (pct > 100.0f) {
+        pct = 100.0f;
+    }
+    CpuHwUsagePercent = (uint32_t)pct;
+}
 
         
 
@@ -1447,6 +1473,7 @@ void scannerToSensorsMap(const std::unique_ptr<ScanI2CTwoWire> &i2cScanner, Scan
 #ifndef PIO_UNIT_TESTING
 void loop()
 {
+    startBusy();
     runASAP = false;
 
     // The single writer of the monotonic wrap carry; every other caller only reads it.
@@ -1619,6 +1646,7 @@ void loop()
     messageStoreAutosaveTick();
 #endif
     long delayMsec = mainController.runOrDelay();
+    endBusy();
 
     // We want to sleep as long as possible here - because it saves power
     if (!runASAP && loopCanSleep()) {
@@ -1635,6 +1663,17 @@ void loop()
 #else
         mainDelay.delay(delayMsec);
 #endif
+    }
+	 uint32_t nowMs = millis();
+    if (!initialized) {
+        initialized = true;
+        lastCheckMs = nowMs;
+        lastBusyUs  = getTotalBusyTimeUs();
+    }
+
+    if (nowMs - lastCheckMs >= 1000) {
+        lastCheckMs = nowMs;
+        updateCpuUsageStats();
     }
 }
 #endif

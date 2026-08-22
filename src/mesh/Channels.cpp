@@ -6,6 +6,7 @@
 #include "NodeDB.h"
 #include "RadioInterface.h"
 #include "configuration.h"
+#include "mesh/udp/UdpBridgePresets.h"
 
 #include <assert.h>
 
@@ -544,16 +545,15 @@ bool Channels::decryptForHash(ChannelIndex chIndex, ChannelHash channelHash)
     }
 }
 
-bool Channels::setDefaultPresetCryptoForHash(ChannelHash channelHash)
+bool Channels::setBridgePresetCryptoForHash(ChannelHash channelHash)
 {
-    // Iterate all known presets
-    for (int preset = _meshtastic_Config_LoRaConfig_ModemPreset_MIN; preset <= _meshtastic_Config_LoRaConfig_ModemPreset_MAX;
-         ++preset) {
-        const char *name = DisplayFormatters::getModemPresetDisplayName((meshtastic_Config_LoRaConfig_ModemPreset)preset, false,
-                                                                        config.lora.use_preset);
-        if (!name)
-            continue;
-        if (strcmp(name, "Invalid") == 0)
+#if HAS_UDP_MULTICAST && defined(UDP_PRESET_BRIDGE) && UDP_PRESET_BRIDGE
+    // Only the presets configured for bridging are tried - not every known preset - so an operator
+    // opts a specific pair (or set) of meshes into cross-preset visibility rather than every preset
+    // silently becoming reachable from every other one. See mesh/udp/UdpBridgePresets.h.
+    for (size_t i = 0; i < udpBridgePresetsCount; ++i) {
+        const char *name = DisplayFormatters::getModemPresetDisplayName(udpBridgePresets[i], false, true);
+        if (!name || strcmp(name, "Invalid") == 0)
             continue; // skip invalid placeholder
         uint8_t h = xorHash((const uint8_t *)name, strlen(name));
         // Expand default PSK alias 1 to actual bytes and xor into hash
@@ -564,10 +564,13 @@ bool Channels::setDefaultPresetCryptoForHash(ChannelHash channelHash)
             memcpy(k.bytes, defaultpsk, sizeof(defaultpsk));
             k.length = sizeof(defaultpsk);
             crypto->setKey(k);
-            LOG_INFO("Matched default preset '%s' for hash 0x%x; set default PSK", name, channelHash);
+            LOG_INFO("UDP bridge: matched preset '%s' for hash 0x%x; set default PSK", name, channelHash);
             return true;
         }
     }
+#else
+    (void)channelHash;
+#endif
     return false;
 }
 

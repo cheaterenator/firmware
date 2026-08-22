@@ -108,9 +108,10 @@ extern volatile bool lockdownDisablePending;
 
 extern uint32_t serialSinceMsec;
 
-static volatile int      g_busyCounter       = 0;
-static volatile uint64_t g_totalBusyTimeUs   = 0;
-static volatile uint64_t g_lastBusyStartUs   = 0;
+static volatile int g_busyCounter = 0;
+static volatile uint64_t g_totalBusyTimeUs = 0;
+// micros() is 32-bit on ESP32/Arduino; store start in the same domain so elapsed deltas wrap safely.
+static volatile uint32_t g_lastBusyStartUs = 0;
 static volatile bool     g_isBusy            = false;
 extern uint32_t CpuHwUsagePercent;
 extern void startBusy();

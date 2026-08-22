@@ -178,7 +178,7 @@ meshtastic_Telemetry DeviceTelemetryModule::getLocalStatsExtendedTelemetry()
 {
     meshtastic_Telemetry telemetry = meshtastic_Telemetry_init_zero;
     telemetry.which_variant = meshtastic_Telemetry_local_stats_extended_tag;
-    telemetry.variant.local_stats = meshtastic_LocalStatsExtended_init_zero;
+    telemetry.variant.local_stats_extended = meshtastic_LocalStatsExtended_init_zero;
     telemetry.time = getTime();
 
     #if defined(ARCH_ESP32)
