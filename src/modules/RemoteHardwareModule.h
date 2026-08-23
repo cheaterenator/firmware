@@ -20,6 +20,21 @@ class RemoteHardwareModule : public ProtobufModule<meshtastic_HardwareMessage>, 
     /// A bitmask of GPIOs that are exposed to the mesh if undefined access is not enabled
     uint64_t availablePins = 0;
 
+#ifdef MESHTASTIC_REMOTE_HARDWARE_PERSIST_GPIO
+    /// GPIOs we've been told to WRITE at least once and their last commanded value, persisted across reboots
+    uint64_t persistedMask = 0;
+    uint64_t persistedValue = 0;
+
+    /// Restore any persisted output pins at boot
+    void loadGpioState();
+
+    /// Merge a WRITE_GPIOS command into our persisted state and flush to flash if it changed
+    void persistGpioWrite(uint64_t mask, uint64_t value);
+
+    /// Write persistedMask/persistedValue to flash
+    void saveGpioState();
+#endif
+
   public:
     /** Constructor
      * name is for debugging output
