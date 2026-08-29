@@ -9,7 +9,13 @@ permissions:
   packages: write
 
 jobs:
+  # Every job below is gated to the upstream repo: this workflow fires on a plain
+  # 'release published/released' event, and each job pushes to a channel that is
+  # tied to the meshtastic org's own credentials/namespace (Docker Hub, Launchpad
+  # PPA, openSUSE OBS, Fedora COPR, meshtastic.github.io). Without this guard, a
+  # release published on a fork would attempt the same pushes there.
   build-docker:
+    if: github.repository == 'meshtastic/firmware'
     uses: ./.github/workflows/docker_manifest.yml
     with:
       release_channel: |-
@@ -17,6 +23,7 @@ jobs:
     secrets: inherit
 
   package-ppa:
+    if: github.repository == 'meshtastic/firmware'
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +40,7 @@ jobs:
     secrets: inherit
 
   package-obs:
+    if: github.repository == 'meshtastic/firmware'
     uses: ./.github/workflows/package_obs.yml
     with:
       obs_project: |-
@@ -42,6 +50,7 @@ jobs:
     secrets: inherit
 
   hook-copr:
+    if: github.repository == 'meshtastic/firmware'
     uses: ./.github/workflows/hook_copr.yml
     with:
       copr_project: |-
@@ -49,7 +58,7 @@ jobs:
     secrets: inherit
 
   publish-release-notes:
-    if: github.event.action == 'published'
+    if: github.repository == 'meshtastic/firmware' && github.event.action == 'published'
     runs-on: ubuntu-latest
     steps:
       - name: Get release version
@@ -81,7 +90,7 @@ jobs:
 
   # Create a PR to bump version when a release is Published
   bump-version:
-    if: github.event.action == 'published'
+    if: github.repository == 'meshtastic/firmware' && github.event.action == 'published'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

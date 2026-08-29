@@ -1,0 +1,154 @@
+# trunk-ignore-all(checkov/CKV_GHA_7): fork-only manual release inputs, not used upstream
+
+name: Fork Release
+
+# Build firmware and publish it as a GitHub Release in THIS repository only.
+#
+# This is deliberately a separate file from main_matrix.yml/release_channels.yml
+# (the upstream release pipeline) rather than a patch to them, for two reasons:
+#   1. It does not exist upstream, so `git merge upstream/develop` never conflicts
+#      with it.
+#   2. It contains no step that reaches outside this repository - no Docker Hub,
+#      no Launchpad PPA / openSUSE OBS / Fedora COPR, no meshtastic.github.io. It
+#      only calls the existing build_firmware.yml reusable workflow (unmodified)
+#      and then attaches the result to a Release on ${{ github.repository }}.
+# The `if: github.repository_owner != 'meshtastic'` guard on every job means this
+# workflow is a no-op even if this file were ever accidentally merged upstream.
+#
+# Trigger is workflow_dispatch only: nothing runs unless you run it by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: string
+        required: false
+        description: Single board env to build, e.g. tbeam. Leave blank to build the set chosen by 'level' instead.
+      level:
+        type: choice
+        options:
+          - pr
+          - full
+          - extra
+        default: pr
+        description: Board set to build when 'target' is blank. pr=smallest/fastest, full=normal release matrix (pr+release), extra=every board including opt-in-only ones.
+      draft:
+        type: boolean
+        default: true
+        description: Create the Release as a draft so you can review/edit it before publishing. Recommended - see note below on publishing.
+
+run-name: "Fork Release: ${{ inputs.target || inputs.level }} on ${{ github.repository }}"
+
+concurrency:
+  group: fork-release-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions: read-all
+
+jobs:
+  setup:
+    if: github.repository_owner != 'meshtastic'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.x
+          cache: pip
+      - run: pip install -U platformio
+      - name: Resolve board matrix
+        id: jsonStep
+        env:
+          TARGET: ${{ inputs.target }}
+          LEVEL: ${{ inputs.level }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$TARGET" ]]; then
+            # Search the broadest set (pr+release+extra) for the one requested board.
+            TARGETS=$(./bin/generate_ci_matrix.py all --level extra | jq -c --arg b "$TARGET" '[.[] | select(.board == $b)]')
+            if [[ "$(jq 'length' <<<"$TARGETS")" == "0" ]]; then
+              echo "::error::Board '$TARGET' not found. Check variants/**/platformio.ini for the exact [env:...] name."
+              exit 1
+            fi
+          else
+            case "$LEVEL" in
+              pr) TARGETS=$(./bin/generate_ci_matrix.py all --level pr) ;;
+              extra) TARGETS=$(./bin/generate_ci_matrix.py all --level extra) ;;
+              *) TARGETS=$(./bin/generate_ci_matrix.py all) ;; # full: pr + release
+            esac
+          fi
+          echo "all=$TARGETS" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Boards to build"
+            echo '```json'
+            echo "$TARGETS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+    outputs:
+      all: ${{ steps.jsonStep.outputs.all }}
+
+  version:
+    if: github.repository_owner != 'meshtastic'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Get release version string
+        id: version
+        run: echo "long=$(./bin/buildinfo.py long)" >> "$GITHUB_OUTPUT"
+        env:
+          BUILD_LOCATION: local
+    outputs:
+      long: ${{ steps.version.outputs.long }}
+
+  build:
+    if: github.repository_owner != 'meshtastic'
+    needs: [setup, version]
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJson(needs.setup.outputs.all) }}
+    # Reused as-is: this is the same reusable workflow main_matrix.yml uses,
+    # unmodified. It only builds and uploads a workflow artifact.
+    uses: ./.github/workflows/build_firmware.yml
+    with:
+      version: ${{ needs.version.outputs.long }}
+      pio_env: ${{ matrix.build.board }}
+      platform: ${{ matrix.build.platform }}
+
+  release:
+    if: github.repository_owner != 'meshtastic'
+    needs: [setup, version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create the Release on this repository.
+    steps:
+      - name: Download built firmware
+        uses: actions/download-artifact@v8
+        with:
+          path: ./output
+          pattern: firmware-*-*
+          merge-multiple: true
+
+      - name: Show downloaded files
+        run: ls -lR ./output
+
+      - name: Package firmware
+        working-directory: output
+        run: |
+          chmod +x device-install.sh device-update.sh 2>/dev/null || true
+          zip -j -9 -r "../firmware-${{ needs.version.outputs.long }}.zip" .
+
+      - name: Create release on this repository
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: ${{ inputs.draft }}
+          prerelease: true
+          tag_name: fork-v${{ needs.version.outputs.long }}
+          name: Fork build ${{ needs.version.outputs.long }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Ad hoc build from `${{ github.repository }}@${{ github.sha }}`.
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Boards built: ${{ needs.setup.outputs.all }}
+          files: firmware-${{ needs.version.outputs.long }}.zip
