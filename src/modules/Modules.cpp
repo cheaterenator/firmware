@@ -40,6 +40,9 @@
 #if !MESHTASTIC_EXCLUDE_REMOTEHARDWARE
 #include "modules/RemoteHardwareModule.h"
 #endif
+#if MESHTASTIC_REMOTE_GPIO_BUTTON && defined(ARCH_ESP32)
+#include "modules/RemoteGpioButtonModule.h"
+#endif
 #if !MESHTASTIC_EXCLUDE_POWERSTRESS
 #include "modules/PowerStressModule.h"
 #endif
@@ -203,6 +206,9 @@ void setupModules()
 
 #if !MESHTASTIC_EXCLUDE_REMOTEHARDWARE
     new RemoteHardwareModule();
+#endif
+#if MESHTASTIC_REMOTE_GPIO_BUTTON && defined(ARCH_ESP32)
+    remoteGpioButtonModule = new RemoteGpioButtonModule();
 #endif
 #if !MESHTASTIC_EXCLUDE_POWERSTRESS
     new PowerStressModule();
