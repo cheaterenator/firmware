@@ -1766,8 +1766,23 @@ void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
         // is opaque to us and would otherwise skip shouldFilterReceived entirely, so the implicit
         // ACK that marks a DM "Delivered to mesh" never fires. The ACK is header-only (from/id), so
         // generate it here from the still-encrypted packet before opaque relay.
-        if (isFromUs(p))
+        if (isFromUs(p)) {
             perhapsGenerateImplicitAckForOwnOverheard(p);
+        } else if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled) {
+            // Sniffer mode (MT-SW): report packets we could not decode with any channel we know
+            // (unknown channel hash, or a one-byte hash collision that failed decode - see
+            // passesRoutingAuthGate()/perhapsDecode()). Being opaque, these never reach
+            // callModules()/handleReceived(), so without this they never reach the phone at all:
+            // relayOpaquePacket() below only ever forwards them back out over the mesh.
+            meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*p);
+            if (copyPtr) {
+                LOG_DEBUG("Sniffer: forwarding unknown-channel packet (hash 0x%x) from=0x%08x to=0x%08x to phone", p->channel,
+                          p->from, p->to);
+                service->sendPacketToPhoneRaw(copyPtr);
+            } else {
+                LOG_WARN("Sniffer: packetPool exhausted, could not copy unknown-channel packet for sniffing");
+            }
+        }
         relayOpaquePacket(p);
         packetPool.release(p);
         return;
