@@ -1,6 +1,7 @@
 #include "Router.h"
 #include "Channels.h"
 #include "CryptoEngine.h"
+#include "airtime.h"
 #include "MeshRadio.h"
 #include "MeshService.h"
 #include "NodeDB.h"
@@ -475,6 +476,11 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
         return meshtastic_Routing_Error_BAD_REQUEST;
     } // should have already been handled by sendLocal
 
+    // Sniffer/OnDemand support (MT-SW/fw+): count this as one of our own TX packets into AirTime's
+    // 10-minute RX+TX packet-count window (read by OnDemandModule's REQUEST_PACKET_RX_HISTORY). Placed
+    // after the bad-request guard above so a bug-path call that never really sends doesn't count.
+    airTime->logPacketSeen();
+
     // Abort sending if we are violating the duty cycle
     float effectiveDutyCycle = getEffectiveDutyCycle();
     if (!config.lora.override_duty_cycle && effectiveDutyCycle < 100) {
@@ -518,6 +524,20 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
     p->from = getFrom(p);
 
     p->relay_node = nodeDB->getLastByteOfNodeNum(getNodeNum()); // set the relayer to us
+
+    // Sniffer mode (MT-SW): forward our own locally-originated TX to the phone (not broadcasts -
+    // those are already delivered locally) so replies/acks this node sends that never went through
+    // MeshModule::sendResponse() (e.g. issued straight to Router::send()) still show up while sniffing.
+    if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled && isFromUs(p) && !isBroadcast(p->to)) {
+        meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*p);
+        if (copyPtr) {
+            LOG_DEBUG("Sniffer: forwarding own TX portnum=%d to=0x%08x to phone",
+                      p->which_payload_variant == meshtastic_MeshPacket_decoded_tag ? p->decoded.portnum : -1, p->to);
+            service->sendPacketToPhoneRaw(copyPtr);
+        } else {
+            LOG_WARN("Sniffer: packetPool exhausted, could not copy own TX for sniffing");
+        }
+    }
 
 #if HAS_VARIABLE_HOPS
     // Apply HopScaling hop recommendation to routine outgoing broadcasts
@@ -590,7 +610,14 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
 #if !MESHTASTIC_EXCLUDE_MQTT
         // Only publish to MQTT if we're the original transmitter of the packet
         if (moduleConfig.mqtt.enabled && isFromUs(p) && mqtt && p_decoded) {
-            mqtt->onSend(*p, *p_decoded, chIndex);
+            // Only publish to MQTT only public messages
+            if(!(p_decoded->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP &&
+                p_decoded->to != 0xffffffff))
+            {
+                mqtt->onSend(*p, *p_decoded, chIndex);
+            }else{
+                LOG_DEBUG("MQTT secured messages enabled, message was not forwarded to broker\n");
+            }
         }
 #endif
         packetPool.release(p_decoded);
@@ -639,6 +666,18 @@ bool Router::findInTxQueue(NodeNum from, PacketId id)
 void Router::sniffReceived(const meshtastic_MeshPacket *p, const meshtastic_Routing *c)
 {
     // FIXME, update nodedb here for any packet that passes through us
+
+    // Sniffer/OnDemand support (MT-SW/fw+): count this as one overheard RX packet into AirTime's
+    // 10-minute RX+TX packet-count window - the send-side half of this lives in Router::send() above.
+    // NOTE: this is deliberately the only packet-count hook; packetHistoryLog (per-packet from/to/port
+    // ring) is already populated from RoutingModule::handleReceivedProtobuf() - adding it here too
+    // would double an entry per packet.
+    airTime->logPacketSeen();
+
+    // Sniffer mode (MT-SW): NOT handled here - see RoutingModule::handleReceivedProtobuf() (the
+    // authoritative fw+ placement puts the promiscuous forward right next to the normal
+    // "deliver to phone" decision, as its else-branch, so it can share that decision's
+    // bcast/toUs check instead of re-deriving it here and duplicating already-delivered traffic).
 }
 
 #if !(MESHTASTIC_EXCLUDE_PKI) && !(MESHTASTIC_EXCLUDE_XEDDSA)
@@ -1067,6 +1106,39 @@ DecodeState perhapsDecode(meshtastic_MeshPacket *p)
             }
         }
     }
+#if HAS_UDP_MULTICAST
+    // UDP preset bridge: an inbound UDP-multicast packet whose hash matched none of this node's own
+    // channels gets one more try against the configured bridge preset list (see
+    // mesh/udp/UdpBridgePresets.h). Off by default; setBridgePresetCryptoForHash() only ever succeeds
+    // when UDP_PRESET_BRIDGE is enabled for this build. Scoped to the default/preset-named channel - a
+    // custom-named channel's hash never depends on the local modem preset, so it already matched above.
+    if (!decrypted && p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP) {
+        if (channels.setBridgePresetCryptoForHash(p->channel)) {
+            memcpy(bytes, p->encrypted.bytes, rawSize);
+            crypto->decrypt(p->from, p->id, rawSize, bytes);
+
+            meshtastic_Data decodedtmp;
+            memset(&decodedtmp, 0, sizeof(decodedtmp));
+            if (pb_decode_from_bytes(bytes, rawSize, &meshtastic_Data_msg, &decodedtmp) &&
+                decodedtmp.portnum != meshtastic_PortNum_UNKNOWN_APP) {
+                p->decoded = decodedtmp;
+                p->which_payload_variant = meshtastic_MeshPacket_decoded_tag;
+                // Map to our local default channel index (name+PSK default), not necessarily primary
+                ChannelIndex defaultIndex = channels.getPrimaryIndex();
+                for (ChannelIndex i = 0; i < channels.getNumChannels(); ++i) {
+                    if (channels.isDefaultChannel(i)) {
+                        defaultIndex = i;
+                        break;
+                    }
+                }
+                chIndex = defaultIndex;
+                decrypted = true;
+            } else {
+                LOG_WARN("UDP bridge decode attempted but failed for hash 0x%x", p->channel);
+            }
+        }
+    }
+#endif
 
     if (decrypted) {
         // parsing was successful

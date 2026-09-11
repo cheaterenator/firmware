@@ -80,11 +80,6 @@ static const uint8_t LOW_ENTROPY_HASHES[][32] = {
     {0xcc, 0x11, 0xfb, 0x1a, 0xab, 0xa1, 0x31, 0x87, 0x6a, 0xc6, 0xde, 0x88, 0x87, 0xa9, 0xb9, 0x59,
      0x37, 0x82, 0x8d, 0xb2, 0xcc, 0xd8, 0x97, 0x40, 0x9a, 0x5c, 0x8f, 0x40, 0x55, 0xcb, 0x4c, 0x3e}};
 static const char LOW_ENTROPY_WARNING[] = "Compromised keys were detected and regenerated.";
-// Shown when a user tries to restore/set a known pre-2.8 low-entropy key: explains why the saved
-// key did not persist and that the node's identity (NodeNum == crc32(public_key)) changed with it.
-static const char LOW_ENTROPY_RESTORE_WARNING[] =
-    "That key is a known pre-2.8 low-entropy key and can't be restored. A new secure key was "
-    "generated; your node number has changed.";
 #endif
 static const char LICENSED_IDENTITY_MIGRATION_WARNING[] =
     "Licensed signing generated a new identity key; this node identity changed.";
@@ -273,6 +268,30 @@ struct NodeHeardAt {
     uint32_t heardAtUptimeSecs = 0; ///< Time::getUptimeSecs() when last heard
 };
 
+// Sniffer/OnDemand support (MT-SW): fixed-size ring of the most recent packet exchanges (from/to/port),
+// read by OnDemandModule::preparePacketHistoryLog(). Plain fields rather than the ondemand.pb.h type,
+// so this foundational header doesn't need to depend on a feature-specific generated proto.
+struct PacketHistoryEntry {
+    uint32_t from_node = 0;
+    uint32_t to_node = 0;
+    uint32_t port_num = 0;
+};
+
+class PacketHistoryLog
+{
+  public:
+    static constexpr size_t CAPACITY = 12;
+    PacketHistoryEntry entries[CAPACITY];
+
+    /// Push a new entry to the front, shifting older entries back; the oldest one is dropped.
+    void addEntry(const PacketHistoryEntry &e)
+    {
+        for (size_t i = CAPACITY - 1; i > 0; i--)
+            entries[i] = entries[i - 1];
+        entries[0] = e;
+    }
+};
+
 class NodeDB
 {
     // NodeNum provisionalNodeNum; // if we are trying to find a node num this is our current attempt
@@ -284,6 +303,10 @@ class NodeDB
 
   public:
     std::vector<meshtastic_NodeInfoLite> *meshNodes;
+
+    /// Sniffer/OnDemand support (MT-SW): ring of the most recent packet exchanges this node has routed.
+    PacketHistoryLog packetHistoryLog;
+
     bool updateGUI = false; // we think the gui should definitely be redrawn, screen will clear this once handled
     meshtastic_NodeInfoLite *updateGUIforNode = NULL; // if currently showing this node, we think you should update the GUI
     Observable<const meshtastic::NodeStatus *> newStatus;
@@ -592,10 +615,6 @@ class NodeDB
 #if !defined(MESHTASTIC_EXCLUDE_PKI)
     bool checkLowEntropyPublicKey(const meshtastic_Config_SecurityConfig_public_key_t &keyToTest);
 #endif
-#if !(MESHTASTIC_EXCLUDE_PKI_KEYGEN || MESHTASTIC_EXCLUDE_PKI)
-    bool generateBlacklistCheckedKeyPair();
-    bool derivePublicKeyFromPrivate();
-#endif
 
     /// Consolidate crypto key generation logic used across multiple modules
     /// @param privateKey Optional 32-byte private key to use. If nullptr, generates new random keys.
@@ -764,6 +783,12 @@ class NodeDB
 };
 
 extern NodeDB *nodeDB;
+
+// Sniffer/OnDemand support (MT-SW).
+/// Packets-seen-per-port counter, indexed by meshtastic_PortNum; index MAX_PORTS-1 catches anything
+/// out of range plus not-decoded (encrypted) packets. Read by OnDemandModule::preparePortCounterHistory().
+extern const uint32_t MAX_PORTS;
+extern uint32_t portCounters[];
 
 /*
   If is_router is set, we use a number of different default values

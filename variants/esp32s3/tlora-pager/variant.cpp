@@ -1,6 +1,6 @@
 #include "variant.h"
-#include "IoExpanderXL9555.hpp"
-extern IoExpanderXL9555 io;
+#include "ExtensionIOXL9555.hpp"
+extern ExtensionIOXL9555 io;
 
 void earlyInitVariant()
 {

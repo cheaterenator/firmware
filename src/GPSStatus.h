@@ -77,8 +77,39 @@ class GPSStatus : public Status
     {
         if (config.position.fixed_position) {
             return localPosition.altitude;
-        } else {
+        } else if (hasLock) {
             return p.altitude;
+        } else {
+            // No onboard GPS fix (or no onboard GPS at all): fall back to localPosition, which is
+            // also how a phone-provided position ("share phone location with mesh") reaches us -
+            // PositionModule::handleReceivedProtobuf() writes it there, never into `p`/hasLock,
+            // which only the local GPS hardware feeds via GPS::publishUpdate().
+            return localPosition.altitude;
+        }
+    }
+
+    // Whether getAltitude() reflects a real, known altitude (a fixed position with an altitude
+    // set, a current GPS fix that reports one, or - lacking both - a phone-provided position that
+    // has one) rather than the default 0 it returns otherwise.
+    bool hasValidAltitude() const
+    {
+        if (config.position.fixed_position) {
+            return localPosition.has_altitude;
+        } else if (hasLock) {
+            return p.has_altitude;
+        } else {
+            return localPosition.has_altitude;
+        }
+    }
+
+    // Whether getAltitude() reflects a real, known altitude (a fixed position with an altitude
+    // set, or a current GPS fix that reports one) rather than the default 0 it returns otherwise.
+    bool hasValidAltitude() const
+    {
+        if (config.position.fixed_position) {
+            return localPosition.has_altitude;
+        } else {
+            return hasLock && p.has_altitude;
         }
     }
 

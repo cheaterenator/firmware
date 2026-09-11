@@ -14,10 +14,12 @@
 #define TEN_SECONDS_MS 10 * 1000
 #define MAX_INTERVAL INT32_MAX // FIXME: INT32_MAX to avoid overflow issues with Apple clients but should be UINT32_MAX
 
-#define min_default_telemetry_interval_secs IF_ROUTER(ONE_DAY / 2, 30 * 60)
+#define min_default_telemetry_interval_secs (30 * 60)
 #define default_gps_update_interval IF_ROUTER(ONE_DAY, 2 * 60)
 #define default_telemetry_broadcast_interval_secs IF_ROUTER(ONE_DAY / 2, 60 * 60)
 #define default_broadcast_interval_secs IF_ROUTER(ONE_DAY / 2, 60 * 60)
+// Sniffer mode (MT-SW): off unless explicitly enabled.
+#define default_sniffer_enabled true
 #define default_broadcast_smart_minimum_interval_secs 5 * 60
 // Floor for our own position broadcasts when stationary (unchanged beyond the broadcast
 // precision) or fixed_position: identical positions get deduped by traffic management anyway.

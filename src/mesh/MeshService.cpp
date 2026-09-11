@@ -138,15 +138,9 @@ void MeshService::loop()
             (void)sendQueueStatusToPhone(qs, 0, 0);
     }
     if (oldFromNum != fromNum) { // We don't want to generate extra notifies for multiple new packets
-        // Snapshot both first: the identity move can run on another task, and anything it bumps during
-        // the pass must still be pending afterwards rather than being marked delivered.
-        const uint32_t num = fromNum;
-        const uint32_t generation = identityGeneration;
-        int result = fromNumChanged.notifyObservers(num);
-        if (result == 0) { // If any observer returns non-zero, we will try again
-            oldFromNum = num;
-            identityGenerationSeen = generation;
-        }
+        int result = fromNumChanged.notifyObservers(fromNum);
+        if (result == 0) // If any observer returns non-zero, we will try again
+            oldFromNum = fromNum;
     }
 }
 
@@ -374,7 +368,7 @@ ErrorCode MeshService::sendQueueStatusToPhone(const meshtastic_QueueStatus &qs, 
     return res ? ERRNO_OK : ERRNO_UNKNOWN;
 }
 
-ErrorCode MeshService::sendToMesh(meshtastic_MeshPacket *p, RxSource src, bool ccToPhone)
+void MeshService::sendToMesh(meshtastic_MeshPacket *p, RxSource src, bool ccToPhone)
 {
     uint32_t mesh_packet_id = p->id;
     nodeDB->updateFrom(*p); // update our local DB for this packet (because phone might have sent position packets etc...)
@@ -410,8 +404,6 @@ ErrorCode MeshService::sendToMesh(meshtastic_MeshPacket *p, RxSource src, bool c
     if (res == ERRNO_SHOULD_RELEASE) {
         releaseToPool(p);
     }
-
-    return res;
 }
 
 bool MeshService::trySendPosition(NodeNum dest, bool wantReplies)
@@ -420,22 +412,35 @@ bool MeshService::trySendPosition(NodeNum dest, bool wantReplies)
 
     assert(node);
 
+    if (nodeDB->hasValidPosition(node)) {
 #if HAS_GPS && !MESHTASTIC_EXCLUDE_GPS
-    // Prefer the node's current channel, but fall back to the position channel
-    // (matching PositionModule::sendOurPosition() behavior).
-    uint8_t sendChan = node->channel;
-    if (nodeDB->hasValidPosition(node) && positionModule &&
-        (config.position.fixed_position || nodeDB->hasLocalPositionSinceBoot()) &&
-        (getPositionPrecisionForChannel(sendChan) != 0 || findPositionChannel(sendChan))) {
-        LOG_INFO("Send position ping to 0x%08x, wantReplies=%d, channel=%d", dest, wantReplies, sendChan);
-        if (positionModule->sendOurPosition(dest, wantReplies, sendChan))
+        if (positionModule) {
+            if (!config.position.fixed_position && !nodeDB->hasLocalPositionSinceBoot()) {
+                LOG_DEBUG("Skip position ping; no fresh position since boot");
+                return false;
+            }
+            // Prefer the node's current channel, but fall back to the position channel
+            // (matching PositionModule::sendOurPosition() behavior).
+            uint8_t sendChan = node->channel;
+            if (getPositionPrecisionForChannel(sendChan) == 0 && !findPositionChannel(sendChan)) {
+                // No channel with position enabled: fall back to sending nodeinfo, as before.
+                if (nodeInfoModule) {
+                    LOG_INFO("No position-enabled channel; send nodeinfo instead to 0x%08x, wantReplies=%d, channel=%d", dest,
+                             wantReplies, node->channel);
+                    nodeInfoModule->sendOurNodeInfo(dest, wantReplies, node->channel);
+                }
+                return false;
+            }
+            LOG_INFO("Send position ping to 0x%08x, wantReplies=%d, channel=%d", dest, wantReplies, sendChan);
+            positionModule->sendOurPosition(dest, wantReplies, sendChan);
             return true;
-    }
+        }
+    } else {
 #endif
-    // No position went out, so a false return tells the callers the nodeinfo fallback was used.
-    if (nodeInfoModule) {
-        LOG_INFO("Send nodeinfo ping to 0x%08x, wantReplies=%d, channel=%d", dest, wantReplies, node->channel);
-        nodeInfoModule->sendOurNodeInfo(dest, wantReplies, node->channel);
+        if (nodeInfoModule) {
+            LOG_INFO("Send nodeinfo ping to 0x%08x, wantReplies=%d, channel=%d", dest, wantReplies, node->channel);
+            nodeInfoModule->sendOurNodeInfo(dest, wantReplies, node->channel);
+        }
     }
     return false;
 }
@@ -521,6 +526,40 @@ void MeshService::sendToPhone(meshtastic_MeshPacket *p)
         LOG_CRIT("Queue to toPhoneQueue failed");
         releaseToPool(p);
         fromNum++; // notify observers so phone can resync
+        return;
+    }
+    fromNum++;
+}
+
+// Sniffer mode (MT-SW): deliver a packet the phone would not otherwise see (not addressed to us, or a
+// copy of a locally-generated module reply) without attempting to decode/reinterpret it further -
+// callers are responsible for handing us a packet already safe to expose as-is. Shares toPhoneQueue
+// with sendToPhone() so it can never grow the queue's static footprint, but is deliberately less eager
+// to evict other traffic: it only displaces the oldest queued packet to make room for itself when the
+// sniffed packet is itself text-like, mirroring sendToPhone()'s own "protect text-like traffic" rule.
+void MeshService::sendPacketToPhoneRaw(meshtastic_MeshPacket *p)
+{
+    if (toPhoneQueue.numFree() == 0) {
+        // Gate the variant check: decoded.portnum aliases encrypted.size in the union.
+        bool isTextLike = p->which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
+                          (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP ||
+                           p->decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP);
+        if (isTextLike) {
+            meshtastic_MeshPacket *d = toPhoneQueue.dequeuePtr(0);
+            if (d)
+                releaseToPool(d);
+        } else {
+            LOG_DEBUG("ToPhone queue full, drop sniffed packet");
+            releaseToPool(p);
+            fromNum++; // notify observers in case they are reconnected so they can get the packets
+            return;
+        }
+    }
+
+    if (toPhoneQueue.enqueue(p, 0) == false) {
+        LOG_CRIT("Queue to toPhoneQueue failed");
+        releaseToPool(p);
+        fromNum++;
         return;
     }
     fromNum++;

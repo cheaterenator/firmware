@@ -124,7 +124,7 @@ void XModemAdapter::sendControl(meshtastic_XModem_Control c)
     packetReady.notifyObservers(packetno);
 }
 
-const meshtastic_XModem &XModemAdapter::getForPhone() const
+meshtastic_XModem XModemAdapter::getForPhone()
 {
     return xmodemStore;
 }

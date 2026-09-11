@@ -48,14 +48,8 @@ typedef enum _meshtastic_ModuleConfig_AudioConfig_Audio_Baud {
     meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_1400 = 4,
     meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_1300 = 5,
     meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_1200 = 6,
-    /* Removed from libcodec2 upstream. A device configured to one of these
- falls back to CODEC2_700C. */
     meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_700 = 7,
-    meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_700B = 8,
-    /* Replaces CODEC2_700. Default for new configurations. */
-    meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_700C = 9,
-    /* Lowest rate, and the only one usable on slower modem presets. */
-    meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_450 = 10
+    meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_700B = 8
 } meshtastic_ModuleConfig_AudioConfig_Audio_Baud;
 
 /* TODO: REPLACE */
@@ -231,7 +225,7 @@ typedef struct _meshtastic_ModuleConfig_AudioConfig {
     bool codec2_enabled;
     /* PTT Pin */
     uint8_t ptt_pin;
-    /* The codec2 bitrate to encode at. Sample rate is always 8 kHz. */
+    /* The audio sample rate to use for codec2 */
     meshtastic_ModuleConfig_AudioConfig_Audio_Baud bitrate;
     /* I2S Word Select */
     uint8_t i2s_ws;
@@ -255,14 +249,10 @@ typedef struct _meshtastic_ModuleConfig_PaxcounterConfig {
 } meshtastic_ModuleConfig_PaxcounterConfig;
 
 /* Config for the Traffic Management module.
- Provides packet inspection and traffic shaping to help reduce channel utilization.
- Every field uses the proto3 zero value to mean "disabled"; there is no
- "use the firmware default" sentinel. Firmware installs its own defaults when it
- first creates this config, and a client that writes 0 turns that feature off. */
+ Provides packet inspection and traffic shaping to help reduce channel utilization */
 typedef struct _meshtastic_ModuleConfig_TrafficManagementConfig {
     /* Minimum interval in seconds between position updates from the same node.
- A non-zero value implicitly enables the suppression window; 0 disables it.
- Firmware default: 21600 (6 hours), installed when this config is first created. */
+ A non-zero value implicitly enables the suppression window; 0 disables it. */
     uint32_t position_min_interval_secs;
     /* Maximum hop distance from the requestor at which direct NodeInfo responses
  are served from the local cache. A non-zero value implicitly enables direct
@@ -521,6 +511,12 @@ typedef struct _meshtastic_ModuleConfig_TAKConfig {
     meshtastic_MemberRole role;
 } meshtastic_ModuleConfig_TAKConfig;
 
+/* Sniffer mode config (MT-SW) */
+typedef struct _meshtastic_ModuleConfig_NodeModAdminConfig {
+    /* sniffer enabled */
+    bool sniffer_enabled;
+} meshtastic_ModuleConfig_NodeModAdminConfig;
+
 /* A GPIO pin definition for remote hardware module */
 typedef struct _meshtastic_RemoteHardwarePin {
     /* GPIO Pin number (must match Arduino) */
@@ -580,6 +576,8 @@ typedef struct _meshtastic_ModuleConfig {
         meshtastic_ModuleConfig_TAKConfig tak;
         /* MeshBeacon module config */
         meshtastic_ModuleConfig_MeshBeaconConfig mesh_beacon;
+        /* Sniffer mode (MT-SW) */
+        meshtastic_ModuleConfig_NodeModAdminConfig nodemodadmin;
     } payload_variant;
 } meshtastic_ModuleConfig;
 
@@ -598,8 +596,8 @@ extern "C" {
 #define _meshtastic_ModuleConfig_DetectionSensorConfig_TriggerType_ARRAYSIZE ((meshtastic_ModuleConfig_DetectionSensorConfig_TriggerType)(meshtastic_ModuleConfig_DetectionSensorConfig_TriggerType_EITHER_EDGE_ACTIVE_HIGH+1))
 
 #define _meshtastic_ModuleConfig_AudioConfig_Audio_Baud_MIN meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_DEFAULT
-#define _meshtastic_ModuleConfig_AudioConfig_Audio_Baud_MAX meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_450
-#define _meshtastic_ModuleConfig_AudioConfig_Audio_Baud_ARRAYSIZE ((meshtastic_ModuleConfig_AudioConfig_Audio_Baud)(meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_450+1))
+#define _meshtastic_ModuleConfig_AudioConfig_Audio_Baud_MAX meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_700B
+#define _meshtastic_ModuleConfig_AudioConfig_Audio_Baud_ARRAYSIZE ((meshtastic_ModuleConfig_AudioConfig_Audio_Baud)(meshtastic_ModuleConfig_AudioConfig_Audio_Baud_CODEC2_700B+1))
 
 #define _meshtastic_ModuleConfig_SerialConfig_Serial_Baud_MIN meshtastic_ModuleConfig_SerialConfig_Serial_Baud_BAUD_DEFAULT
 #define _meshtastic_ModuleConfig_SerialConfig_Serial_Baud_MAX meshtastic_ModuleConfig_SerialConfig_Serial_Baud_BAUD_921600
@@ -650,6 +648,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_TAKConfig_team_ENUMTYPE meshtastic_Team
 #define meshtastic_ModuleConfig_TAKConfig_role_ENUMTYPE meshtastic_MemberRole
 
+
 #define meshtastic_RemoteHardwarePin_type_ENUMTYPE meshtastic_RemoteHardwarePinType
 
 
@@ -674,6 +673,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_MeshBeaconConfig_init_default {0, "", false, meshtastic_ChannelSettings_init_default, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, 0, 0, {meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default}}
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default {false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, 0}
 #define meshtastic_ModuleConfig_TAKConfig_init_default {_meshtastic_Team_MIN, _meshtastic_MemberRole_MIN}
+#define meshtastic_ModuleConfig_NodeModAdminConfig_init_default {0}
 #define meshtastic_RemoteHardwarePin_init_default {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 #define meshtastic_ModuleConfig_init_zero        {0, {meshtastic_ModuleConfig_MQTTConfig_init_zero}}
 #define meshtastic_ModuleConfig_MQTTConfig_init_zero {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_zero}
@@ -695,6 +695,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_MeshBeaconConfig_init_zero {0, "", false, meshtastic_ChannelSettings_init_zero, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, 0, 0, {meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero}}
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero {false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, 0}
 #define meshtastic_ModuleConfig_TAKConfig_init_zero {_meshtastic_Team_MIN, _meshtastic_MemberRole_MIN}
+#define meshtastic_ModuleConfig_NodeModAdminConfig_init_zero {0}
 #define meshtastic_RemoteHardwarePin_init_zero   {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -816,6 +817,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_MeshBeaconConfig_broadcast_targets_tag 13
 #define meshtastic_ModuleConfig_TAKConfig_team_tag 1
 #define meshtastic_ModuleConfig_TAKConfig_role_tag 2
+#define meshtastic_ModuleConfig_NodeModAdminConfig_sniffer_enabled_tag 1
 #define meshtastic_RemoteHardwarePin_gpio_pin_tag 1
 #define meshtastic_RemoteHardwarePin_name_tag    2
 #define meshtastic_RemoteHardwarePin_type_tag    3
@@ -839,6 +841,7 @@ extern "C" {
 #define meshtastic_ModuleConfig_traffic_management_tag 15
 #define meshtastic_ModuleConfig_tak_tag          16
 #define meshtastic_ModuleConfig_mesh_beacon_tag  17
+#define meshtastic_ModuleConfig_nodemodadmin_tag 18
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_ModuleConfig_FIELDLIST(X, a) \
@@ -858,7 +861,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,paxcounter,payload_variant.p
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,statusmessage,payload_variant.statusmessage),  14) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,traffic_management,payload_variant.traffic_management),  15) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,tak,payload_variant.tak),  16) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,mesh_beacon,payload_variant.mesh_beacon),  17)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,mesh_beacon,payload_variant.mesh_beacon),  17) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,nodemodadmin,payload_variant.nodemodadmin),  18)
 #define meshtastic_ModuleConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_DEFAULT NULL
 #define meshtastic_ModuleConfig_payload_variant_mqtt_MSGTYPE meshtastic_ModuleConfig_MQTTConfig
@@ -878,6 +882,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,mesh_beacon,payload_variant.
 #define meshtastic_ModuleConfig_payload_variant_traffic_management_MSGTYPE meshtastic_ModuleConfig_TrafficManagementConfig
 #define meshtastic_ModuleConfig_payload_variant_tak_MSGTYPE meshtastic_ModuleConfig_TAKConfig
 #define meshtastic_ModuleConfig_payload_variant_mesh_beacon_MSGTYPE meshtastic_ModuleConfig_MeshBeaconConfig
+#define meshtastic_ModuleConfig_payload_variant_nodemodadmin_MSGTYPE meshtastic_ModuleConfig_NodeModAdminConfig
 
 #define meshtastic_ModuleConfig_MQTTConfig_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enabled,           1) \
@@ -1080,6 +1085,11 @@ X(a, STATIC,   SINGULAR, UENUM,    role,              2)
 #define meshtastic_ModuleConfig_TAKConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_TAKConfig_DEFAULT NULL
 
+#define meshtastic_ModuleConfig_NodeModAdminConfig_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     sniffer_enabled,   1)
+#define meshtastic_ModuleConfig_NodeModAdminConfig_CALLBACK NULL
+#define meshtastic_ModuleConfig_NodeModAdminConfig_DEFAULT NULL
+
 #define meshtastic_RemoteHardwarePin_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   gpio_pin,          1) \
 X(a, STATIC,   SINGULAR, STRING,   name,              2) \
@@ -1107,6 +1117,7 @@ extern const pb_msgdesc_t meshtastic_ModuleConfig_StatusMessageConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_MeshBeaconConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_TAKConfig_msg;
+extern const pb_msgdesc_t meshtastic_ModuleConfig_NodeModAdminConfig_msg;
 extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -1130,6 +1141,7 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_MeshBeaconConfig_fields &meshtastic_ModuleConfig_MeshBeaconConfig_msg
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_fields &meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_msg
 #define meshtastic_ModuleConfig_TAKConfig_fields &meshtastic_ModuleConfig_TAKConfig_msg
+#define meshtastic_ModuleConfig_NodeModAdminConfig_fields &meshtastic_ModuleConfig_NodeModAdminConfig_msg
 #define meshtastic_RemoteHardwarePin_fields &meshtastic_RemoteHardwarePin_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -1142,8 +1154,9 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_MQTTConfig_size  224
 #define meshtastic_ModuleConfig_MapReportSettings_size 14
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_size 10
-#define meshtastic_ModuleConfig_MeshBeaconConfig_size 242
+#define meshtastic_ModuleConfig_MeshBeaconConfig_size 240
 #define meshtastic_ModuleConfig_NeighborInfoConfig_size 10
+#define meshtastic_ModuleConfig_NodeModAdminConfig_size 2
 #define meshtastic_ModuleConfig_PaxcounterConfig_size 30
 #define meshtastic_ModuleConfig_RangeTestConfig_size 12
 #define meshtastic_ModuleConfig_RemoteHardwareConfig_size 96
@@ -1153,7 +1166,7 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_TAKConfig_size   4
 #define meshtastic_ModuleConfig_TelemetryConfig_size 50
 #define meshtastic_ModuleConfig_TrafficManagementConfig_size 30
-#define meshtastic_ModuleConfig_size             246
+#define meshtastic_ModuleConfig_size             244
 #define meshtastic_RemoteHardwarePin_size        21
 
 #ifdef __cplusplus

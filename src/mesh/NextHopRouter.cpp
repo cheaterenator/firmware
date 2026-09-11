@@ -100,6 +100,8 @@ ErrorCode NextHopRouter::send(meshtastic_MeshPacket *p)
 
 ErrorCode NextHopRouter::sendWithNextHop(meshtastic_MeshPacket *p, bool trackRetransmission)
 {
+    nexthop_counter++;
+
     // Add any messages _we_ send to the seen message list (so we will ignore all retransmissions we see)
     p->relay_node = nodeDB->getLastByteOfNodeNum(getNodeNum()); // First set the relayer to us
     wasSeenRecently(p);                                         // FIXME, move this to a sniffSent method
@@ -248,6 +250,12 @@ bool NextHopRouter::perhapsRebroadcast(const meshtastic_MeshPacket *p)
 
     if (p->to == NODENUM_BROADCAST_NO_LORA)
         return false;
+
+    // Track packets that would otherwise be eligible for rebroadcast but were dropped because the
+    // hop budget was already exhausted (not the "exhaustHops" forced case, which still relays once).
+    if (!isToUs(p) && !isFromUs(p) && p->hop_limit == 0 && !exhaustHops) {
+        blocked_by_hoplimit++;
+    }
 
     // Allow rebroadcast if hop_limit > 0 OR if we're exhausting hops (which sets hop_limit = 0 but still needs one relay)
     if (!isToUs(p) && !isFromUs(p) && (p->hop_limit > 0 || exhaustHops)) {

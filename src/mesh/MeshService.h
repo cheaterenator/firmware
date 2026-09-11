@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <assert.h>
-#include <atomic>
 #include <string>
 
 #include "GPSStatus.h"
@@ -73,9 +72,8 @@ class MeshService
     // This holds the last QueueStatus send
     meshtastic_QueueStatus lastQueueStatus;
 
-    /// The current nonce for the newest packet which has been queued for the phone. Bumped from
-    /// whichever task queued it, read by loop(), hence atomic.
-    std::atomic<uint32_t> fromNum{0};
+    /// The current nonce for the newest packet which has been queued for the phone
+    uint32_t fromNum = 0;
 
     /// Updated in loop() to detect when fromNum changes
     uint32_t oldFromNum = 0;
@@ -162,14 +160,6 @@ class MeshService
     /// senders.
     void nudgeFromNum() { fromNum++; }
 
-    /// Bumped with a nudgeFromNum() when our node num changes; the seen counter only advances once a
-    /// notify pass has reached every client, so a move landing during a pass stays pending after it.
-    std::atomic<uint32_t> identityGeneration{0};
-    std::atomic<uint32_t> identityGenerationSeen{0};
-
-    /// True while a node num change still owes connected clients a fresh MyInfo.
-    bool identityMovePending() const { return identityGeneration != identityGenerationSeen; }
-
     /**
      *  Given a ToRadio buffer parse it and properly handle it (setup radio, owner or send packet into the mesh)
      * Called by PhoneAPI.handleToRadio.  Note: p is a scratch buffer, this function is allowed to write to it but it can not keep
@@ -199,8 +189,7 @@ class MeshService
     /// Send a packet into the mesh - note p must have been allocated from packetPool.  We will return it to that pool after
     /// sending. This is the ONLY function you should use for sending messages into the mesh, because it also updates the nodedb
     /// cache
-    /// Returns the router's verdict: ERRNO_OK / ERRNO_SHOULD_RELEASE accepted, anything else released unsent.
-    ErrorCode sendToMesh(meshtastic_MeshPacket *p, RxSource src = RX_SRC_LOCAL, bool ccToPhone = false);
+    void sendToMesh(meshtastic_MeshPacket *p, RxSource src = RX_SRC_LOCAL, bool ccToPhone = false);
 
     /** Attempt to cancel a previously sent packet from this _local_ node.  Returns true if a packet was found we could cancel */
     bool cancelSending(PacketId id);
@@ -210,6 +199,12 @@ class MeshService
 
     /// Send a packet to the phone
     void sendToPhone(meshtastic_MeshPacket *p);
+
+    /// Sniffer mode (MT-SW): send a packet the node is not the intended recipient of (or a copy of a
+    /// locally-generated reply) to the phone without attempting to decrypt/reinterpret it further.
+    /// Uses the same toPhoneQueue as sendToPhone so it can never grow the queue's memory footprint,
+    /// but is intentionally less eager to evict other traffic to make room for it - see the .cpp.
+    void sendPacketToPhoneRaw(meshtastic_MeshPacket *p);
 
     /// Send an MQTT message to the phone for client proxying
     virtual void sendMqttMessageToClientProxy(meshtastic_MqttClientProxyMessage *m);

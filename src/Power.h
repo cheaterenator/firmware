@@ -21,7 +21,8 @@
 // STM32 VDD/VBAT absolute maximum is 4V so use an LFP curve
 #define OCV_ARRAY 3650, 3400, 3340, 3320, 3300, 3280, 3270, 3260, 3240, 3200, 2500
 #else
-#define OCV_ARRAY 4190, 4050, 3990, 3890, 3800, 3720, 3630, 3530, 3420, 3300, 3100
+// #define OCV_ARRAY 4190, 4050, 3990, 3890, 3800, 3720, 3630, 3530, 3420, 3300, 3100
+#define OCV_ARRAY 4200, 3986, 3922, 3812, 3734, 3645, 3527, 3420, 3281, 3087, 2786
 #endif
 #endif
 
@@ -29,12 +30,6 @@
 #ifndef NUM_CELLS
 #define NUM_CELLS 1
 #endif
-
-/// Consecutive below-cutoff readings needed before the low-battery deep sleep fires.
-static constexpr uint8_t LOW_VOLTAGE_READINGS_BEFORE_SHUTDOWN = 10;
-
-/// Advance the low-battery shutdown counter by one reading; true once the device should deep sleep.
-bool updateLowVoltageCounter(uint8_t &counter, bool hasBattery, bool hasUsb, uint16_t battMv, uint16_t cutoffMv);
 
 #if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
 #include "modules/Telemetry/Sensor/nullSensor.h"
@@ -104,7 +99,7 @@ class Power : public concurrency::OSThread
     virtual int32_t runOnce() override;
     void setStatusHandler(meshtastic::PowerStatus *handler) { statusHandler = handler; }
     const uint16_t OCV[11] = {OCV_ARRAY};
-    bool isLowBattery() { return low_voltage_counter >= LOW_VOLTAGE_READINGS_BEFORE_SHUTDOWN; };
+    bool isLowBattery() { return low_voltage_counter >= 10; };
 
 #ifdef ARCH_ESP32
     int beforeLightSleep(void *unused);

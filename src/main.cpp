@@ -162,7 +162,9 @@ void printPartitionTable()
 #endif // ARCH_ESP32
 
 #include "AmbientLightingThread.h"
+#include "AutoRebootThread.h"
 #include "PowerFSMThread.h"
+#include "WatchdogTestThread.h"
 
 #if !defined(ARCH_STM32WL) && !MESHTASTIC_EXCLUDE_I2C && !MESHTASTIC_EXCLUDE_ACCELEROMETER
 #include "motion/AccelerometerThread.h"
@@ -261,6 +263,15 @@ ScanI2C::FoundDevice rgb_found = ScanI2C::FoundDevice(ScanI2C::DeviceType::NONE,
 /// The I2C address of our Air Quality Indicator (if found)
 ScanI2C::DeviceAddress aqi_found = ScanI2C::ADDRESS_NONE;
 
+uint64_t busyHistory[60] = {0};
+ 		int      currentIndex    = 0;
+ 		uint64_t lastBusyUs      = 0;
+ 		uint32_t lastCheckMs     = 0;
+ 		bool     initialized     = false;
+ 		uint32_t CpuHwUsagePercent = 0;
+
+
+
 #ifdef HAS_DRV2605
 Adafruit_DRV2605 drv;
 #endif
@@ -278,6 +289,86 @@ bool pmu_found;
 // Array map of sensor types with i2c address and wire as we'll find in the i2c scan
 std::pair<uint8_t, TwoWire *> nodeTelemetrySensorsMap[_meshtastic_TelemetrySensorType_MAX + 1] = {};
 #endif
+
+void startBusy()
+ 		{
+ 		    if (++g_busyCounter == 1) {
+ 		        g_lastBusyStartUs = (uint32_t)micros();
+ 		        g_isBusy = true;
+ 		    }
+ 		}
+ 		 
+ 		void endBusy()
+ 		{
+ 		    if (g_busyCounter <= 0) {
+ 		        g_busyCounter = 0;
+ 		        return;
+ 		    }
+ 		 
+ 		    if (--g_busyCounter == 0) {
+ 		        const uint32_t now = (uint32_t)micros();
+				g_totalBusyTimeUs += (uint64_t)(now - g_lastBusyStartUs);
+ 		        g_isBusy = false;
+ 		    }
+ 		}
+ 		 
+ 		uint64_t getTotalBusyTimeUs()
+ 		{
+ 		    if (g_isBusy) {
+ 		        const uint32_t now = (uint32_t)micros();
+				return g_totalBusyTimeUs + (uint64_t)(now - g_lastBusyStartUs);
+ 		    } else {
+ 		        return g_totalBusyTimeUs;
+ 		    }
+ 		}
+ 		 
+ 		//void updateCpuUsageStats()
+ 		//{
+ 		//    uint64_t currentBusy = getTotalBusyTimeUs();
+ 		//    uint64_t deltaUs     = currentBusy - lastBusyUs;
+ 		//    lastBusyUs           = currentBusy;
+ 		// 
+ 		//    busyHistory[currentIndex] = deltaUs;
+ 		//    currentIndex = (currentIndex + 1) % 60;
+ 	///	 
+ 	//	    uint64_t sumBusyUs = 0;
+ 	//	    for (int i = 0; i < 60; i++) {
+ 	//	        sumBusyUs += busyHistory[i];
+ 	//	    }
+ 	//	 
+ 	//	    CpuHwUsagePercent = ( (float)sumBusyUs / (60.0f * 1000000.0f) ) * 100.0f;
+ 	//
+//	}
+		
+void updateCpuUsageStats()
+{
+    uint64_t currentBusy = getTotalBusyTimeUs();
+    uint64_t deltaUs = currentBusy - lastBusyUs;
+    lastBusyUs = currentBusy;
+
+    // One sample should represent ~1s of wall time; clamp pathological values (e.g. stalled tick).
+    const uint64_t maxReasonableBusyUsPerSample = 5ULL * 1000000ULL;
+    if (deltaUs > maxReasonableBusyUsPerSample) {
+        deltaUs = maxReasonableBusyUsPerSample;
+    }
+
+    busyHistory[currentIndex] = deltaUs;
+    currentIndex = (currentIndex + 1) % 60;
+
+    uint64_t sumBusyUs = 0;
+    for (int i = 0; i < 60; i++) {
+        sumBusyUs += busyHistory[i];
+    }
+
+    float pct = ((float)sumBusyUs / (60.0f * 1000000.0f)) * 100.0f;
+    if (pct > 100.0f) {
+        pct = 100.0f;
+    }
+    CpuHwUsagePercent = (uint32_t)pct;
+}
+
+        
+
 
 Router *router = NULL; // Users of router don't care what sort of subclass implements that API
 
@@ -305,6 +396,10 @@ uint32_t timeLastPowered = 0;
 
 static OSThread *powerFSMthread;
 AmbientLightingThread *ambientLightingThread;
+AutoRebootThread *autoRebootThread;
+#if WATCHDOG_TEST_ENABLED
+WatchdogTestThread *watchdogTestThread;
+#endif
 
 RadioLibHal *RadioLibHAL = NULL;
 
@@ -1067,6 +1162,14 @@ void setup()
 
     nodeStatus->observe(&nodeDB->newStatus);
 
+#if !MESHTASTIC_EXCLUDE_AUTO_REBOOT
+    autoRebootThread = new AutoRebootThread();
+#endif
+
+#if WATCHDOG_TEST_ENABLED
+    watchdogTestThread = new WatchdogTestThread();
+#endif
+
 #ifdef HAS_I2S
     LOG_DEBUG("Start audio thread");
     audioThread = new AudioThread();
@@ -1302,11 +1405,7 @@ extern meshtastic_DeviceMetadata getDeviceMetadata()
     meshtastic_DeviceMetadata deviceMetadata = meshtastic_DeviceMetadata_init_default;
     strncpy(deviceMetadata.firmware_version, optstr(APP_VERSION), sizeof(deviceMetadata.firmware_version));
     deviceMetadata.device_state_version = DEVICESTATE_CUR_VER;
-#if defined(ARCH_STM32WL) && HAS_CPU_SHUTDOWN
-    deviceMetadata.canShutdown = stm32wlRtcAvailable();
-#else
     deviceMetadata.canShutdown = pmu_found || HAS_CPU_SHUTDOWN;
-#endif
     deviceMetadata.hasBluetooth = HAS_BLUETOOTH;
     deviceMetadata.hasWifi = HAS_WIFI;
     deviceMetadata.hasEthernet = HAS_ETHERNET;
@@ -1320,18 +1419,6 @@ extern meshtastic_DeviceMetadata getDeviceMetadata()
 #endif
 #if MESHTASTIC_EXCLUDE_AUDIO
     deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_AUDIO_CONFIG;
-#endif
-#if MESHTASTIC_EXCLUDE_MQTT
-    deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_MQTT_CONFIG;
-#endif
-#if MESHTASTIC_EXCLUDE_NEIGHBORINFO
-    deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_NEIGHBORINFO_CONFIG;
-#endif
-#if MESHTASTIC_EXCLUDE_STOREFORWARD
-    deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_STOREFORWARD_CONFIG;
-#endif
-#if !HAS_TELEMETRY
-    deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_TELEMETRY_CONFIG;
 #endif
 // Option to explicitly include canned messages for edge cases, e.g. niche graphics
 #if ((!HAS_SCREEN || NO_EXT_GPIO) || MESHTASTIC_EXCLUDE_CANNEDMESSAGES) && !defined(MESHTASTIC_INCLUDE_NICHE_GRAPHICS)
@@ -1349,7 +1436,7 @@ extern meshtastic_DeviceMetadata getDeviceMetadata()
 #if NO_EXT_GPIO && NO_GPS || MESHTASTIC_EXCLUDE_SERIAL
     deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_SERIAL_CONFIG;
 #endif
-#if !defined(ARCH_ESP32) || MESHTASTIC_EXCLUDE_PAXCOUNTER
+#ifndef ARCH_ESP32
     deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_PAXCOUNTER_CONFIG;
 #endif
 #if !defined(HAS_RGB_LED) && !RAK_4631
@@ -1361,12 +1448,14 @@ extern meshtastic_DeviceMetadata getDeviceMetadata()
 // No bluetooth on these targets (yet):
 // Pico W / 2W may get it at some point
 // Portduino and ESP32-C6 are excluded because we don't have a working bluetooth stacks integrated yet.
-#if defined(ARCH_RP2040) || defined(ARCH_PORTDUINO) || defined(ARCH_STM32) || defined(CONFIG_IDF_TARGET_ESP32C6) || !HAS_BLUETOOTH
+#if defined(ARCH_RP2040) || defined(ARCH_PORTDUINO) || defined(ARCH_STM32) || defined(CONFIG_IDF_TARGET_ESP32C6)
     deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_BLUETOOTH_CONFIG;
 #endif
 
-#if !HAS_NETWORKING // covers nRF52 (non-ethernet RAK) and RP2040 without WiFi/ethernet
-    deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_NETWORK_CONFIG;
+#if defined(ARCH_NRF52) && !HAS_ETHERNET // nrf52 doesn't have network unless it's a RAK ethernet gateway currently
+    deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_NETWORK_CONFIG; // No network on nRF52
+#elif defined(ARCH_RP2040) && !HAS_WIFI && !HAS_ETHERNET
+    deviceMetadata.excluded_modules |= meshtastic_ExcludedModules_NETWORK_CONFIG; // No network on RP2040
 #endif
 
 #if !(MESHTASTIC_EXCLUDE_PKI)
@@ -1393,6 +1482,7 @@ void scannerToSensorsMap(const std::unique_ptr<ScanI2CTwoWire> &i2cScanner, Scan
 #ifndef PIO_UNIT_TESTING
 void loop()
 {
+    startBusy();
     runASAP = false;
 
     // The single writer of the monotonic wrap carry; every other caller only reads it.
@@ -1502,8 +1592,6 @@ void loop()
         static uint32_t lastAgcReset;
         if (!Throttle::isWithinTimespanMs(lastAgcReset, AGC_RESET_INTERVAL_MS)) {
             lastAgcReset = millis();
-            // Sample before resetAGC(): recalibrating the frontend biases an RSSI read taken right after it.
-            RadioLibInterface::instance->updateNoiseFloor();
             RadioLibInterface::instance->periodicRadioMaintenance();
         }
     }
@@ -1554,7 +1642,7 @@ void loop()
             rebootAtMsec = millis() + 25;
         }
     }
-#if HAS_TFT && HAS_SCREEN
+#if HAS_TFT
     if (screen && portduino_config.displayPanel == x11 &&
         config.display.displaymode != meshtastic_Config_DisplayConfig_DisplayMode_COLOR) {
         auto dispdev = screen->getDisplayDevice();
@@ -1573,6 +1661,7 @@ void loop()
     waypointStoreAutosaveTick();
 #endif
     long delayMsec = mainController.runOrDelay();
+    endBusy();
 
     // We want to sleep as long as possible here - because it saves power
     if (!runASAP && loopCanSleep()) {
@@ -1589,6 +1678,17 @@ void loop()
 #else
         mainDelay.delay(delayMsec);
 #endif
+    }
+	 uint32_t nowMs = millis();
+    if (!initialized) {
+        initialized = true;
+        lastCheckMs = nowMs;
+        lastBusyUs  = getTotalBusyTimeUs();
+    }
+
+    if (nowMs - lastCheckMs >= 1000) {
+        lastCheckMs = nowMs;
+        updateCpuUsageStats();
     }
 }
 #endif

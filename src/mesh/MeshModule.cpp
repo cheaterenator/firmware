@@ -93,6 +93,8 @@ meshtastic_MeshPacket *MeshModule::allocAckNak(meshtastic_Routing_Error err, Nod
 
 meshtastic_MeshPacket *MeshModule::allocErrorResponse(meshtastic_Routing_Error err, const meshtastic_MeshPacket *p)
 {
+    router->packetErrorCounters[static_cast<uint32_t>(err)]++;
+
     // If the original packet couldn't be decoded, use the primary channel
     uint8_t channelIndex =
         p->which_payload_variant == meshtastic_MeshPacket_decoded_tag ? p->channel : channels.getPrimaryIndex();
@@ -244,6 +246,21 @@ void MeshModule::sendResponse(const meshtastic_MeshPacket &req)
 {
     auto r = allocReply();
     if (r) {
+        // Sniffer mode (MT-SW): hand a copy of every locally-generated module reply to the phone
+        // before it's addressed/queued for the mesh, so a connected app can observe traffic this
+        // node answers even when it isn't the intended recipient. Config-backed and persisted since
+        // localonly.proto grew LocalModuleConfig.nodemodadmin (field 19); settable via AdminMessage
+        // set_module_config like any other module. Defaults OFF (default_sniffer_enabled).
+        if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled) {
+            meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*r);
+            if (copyPtr) {
+                LOG_DEBUG("Sniffer: forwarding module reply portnum=%d to=0x%08x to phone", r->decoded.portnum, r->to);
+                service->sendPacketToPhoneRaw(copyPtr);
+            } else {
+                LOG_WARN("Sniffer: packetPool exhausted, could not copy reply portnum=%d for sniffing", r->decoded.portnum);
+            }
+        }
+
         setReplyTo(r, req);
         currentReply = r;
     } else {

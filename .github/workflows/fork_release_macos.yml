@@ -1,0 +1,98 @@
+# trunk-ignore-all(checkov/CKV_GHA_7): fork-only manual release inputs, not used upstream
+
+name: Fork Release MacOS
+
+# Build the native macOS binary (both OS versions upstream CI builds) and
+# publish it as a GitHub Release in THIS repository only - same principle as
+# fork_release.yml: a separate file (no merge conflicts with upstream),
+# workflow_dispatch only, and it only calls the existing build_macos_bin.yml
+# reusable workflow (unmodified) then attaches the result to a Release on
+# ${{ github.repository }}. No step reaches outside this repository.
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        type: boolean
+        default: true
+        description: Create the Release as a draft so you can review it before publishing.
+
+run-name: "Fork Release MacOS on ${{ github.repository }}"
+
+concurrency:
+  group: fork-release-macos-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions: read-all
+
+jobs:
+  version:
+    if: github.repository_owner != 'meshtastic'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Get release version string
+        id: version
+        run: echo "long=$(./bin/buildinfo.py long)" >> "$GITHUB_OUTPUT"
+        env:
+          BUILD_LOCATION: local
+    outputs:
+      long: ${{ steps.version.outputs.long }}
+
+  build:
+    if: github.repository_owner != 'meshtastic'
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        macos_ver: ["26", "15"] # Same pair as main_matrix.yml's 'MacOS' job.
+    # Reused as-is: same reusable workflow main_matrix.yml calls for the
+    # 'MacOS' job. Only builds and uploads a workflow artifact.
+    uses: ./.github/workflows/build_macos_bin.yml
+    with:
+      macos_ver: ${{ matrix.macos_ver }}
+
+  release:
+    if: github.repository_owner != 'meshtastic'
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create/update the Release on this repository.
+    steps:
+      - name: Download macOS 26 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: firmware-macos-26-${{ needs.version.outputs.long }}
+          path: ./output/macos-26
+          merge-multiple: true
+
+      - name: Download macOS 15 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: firmware-macos-15-${{ needs.version.outputs.long }}
+          path: ./output/macos-15
+          merge-multiple: true
+
+      - name: Show downloaded files
+        run: ls -lR ./output
+
+      - name: Package
+        run: |
+          zip -j -9 -r "meshtasticd-macos-26-${{ needs.version.outputs.long }}.zip" ./output/macos-26
+          zip -j -9 -r "meshtasticd-macos-15-${{ needs.version.outputs.long }}.zip" ./output/macos-15
+
+      - name: Create/update release on this repository
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: ${{ inputs.draft }}
+          prerelease: true
+          append_body: true
+          tag_name: fork-v${{ needs.version.outputs.long }}
+          name: Fork build ${{ needs.version.outputs.long }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            ### macOS
+            `meshtasticd-macos-26-${{ needs.version.outputs.long }}.zip` (macOS 26, ARM64) and `meshtasticd-macos-15-${{ needs.version.outputs.long }}.zip` (macOS 15, ARM64) added by run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}.
+          files: |
+            meshtasticd-macos-26-${{ needs.version.outputs.long }}.zip
+            meshtasticd-macos-15-${{ needs.version.outputs.long }}.zip

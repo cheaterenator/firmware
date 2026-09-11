@@ -165,12 +165,12 @@ https://github.com/brad112358/easy_E22
 #define LORA_CS (32 + 13) // P1.13
 
 // LORA MODULES
-#define USE_LLCC68
+//#define USE_LLCC68
 #define USE_SX1262
-#define USE_RF95
-#define USE_SX1268
-#define USE_LR1121
-#define USE_LR2021
+//#define USE_RF95
+//#define USE_SX1268
+//#define USE_LR1121
+//#define USE_LR2021
 
 // RF95 CONFIG
 #define LORA_DIO0 (0 + 29) // P0.29 BUSY

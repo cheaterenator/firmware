@@ -66,6 +66,9 @@ PB_BIND(meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget, meshtastic_Mod
 PB_BIND(meshtastic_ModuleConfig_TAKConfig, meshtastic_ModuleConfig_TAKConfig, AUTO)
 
 
+PB_BIND(meshtastic_ModuleConfig_NodeModAdminConfig, meshtastic_ModuleConfig_NodeModAdminConfig, AUTO)
+
+
 PB_BIND(meshtastic_RemoteHardwarePin, meshtastic_RemoteHardwarePin, AUTO)
 
 

@@ -1432,13 +1432,11 @@ uint32_t RadioInterface::computeSlotTimeMsec()
 
 /**
  * Some regulatory regions limit xmit power.
- * This function should be called by subclasses after setting their desired power.  It might lower it.
- * Re-derives `power` from config each call so a re-init that runs it twice cannot subtract PA gain twice.
+ * This function should be called by subclasses after setting their desired power.  It might lower it
  */
 void RadioInterface::limitPower(int8_t loraMaxPower)
 {
-    power = config.lora.tx_power; // applyModemConfig() writes the resolved value back here
-    uint8_t maxPower = 255;       // No limit
+    uint8_t maxPower = 255; // No limit
 
     if (myRegion->powerLimit)
         maxPower = myRegion->powerLimit;

@@ -45,6 +45,11 @@
 #if !MESHTASTIC_EXCLUDE_REMOTEHARDWARE
 #include "modules/RemoteHardwareModule.h"
 #endif
+#include "NodeDB.h"
+#include "modules/OnDemandModule.h"
+#if MESHTASTIC_REMOTE_GPIO_BUTTON && defined(ARCH_ESP32)
+#include "modules/RemoteGpioButtonModule.h"
+#endif
 #if !MESHTASTIC_EXCLUDE_POWERSTRESS
 #include "modules/PowerStressModule.h"
 #endif
@@ -89,6 +94,8 @@
 #if !MESHTASTIC_EXCLUDE_GENERIC_THREAD_MODULE
 #include "modules/GenericThreadModule.h"
 #endif
+
+#include "modules/SignalReplyModule.h"
 
 #ifdef ARCH_ESP32
 #if defined(USE_SX1280) && !MESHTASTIC_EXCLUDE_AUDIO
@@ -207,6 +214,16 @@ void setupModules()
 #if !MESHTASTIC_EXCLUDE_REMOTEHARDWARE
     new RemoteHardwareModule();
 #endif
+    onDemandModule = new OnDemandModule();
+    // Sniffer/OnDemand diag (MT-SW): sniffer_enabled now lives in moduleConfig.nodemodadmin
+    // (persisted, settable via AdminMessage set_module_config) - if sniffing still "doesn't work",
+    // check this line first: has_nodemodadmin should be true (installDefaultModuleConfig() sets it)
+    // and sniffer_enabled reflects whatever was last configured, default OFF.
+    LOG_INFO("OnDemand/Sniffer: onDemandModule registered on port %d, has_nodemodadmin=%d sniffer_enabled=%d",
+             meshtastic_PortNum_ON_DEMAND_APP, moduleConfig.has_nodemodadmin, moduleConfig.nodemodadmin.sniffer_enabled);
+#if MESHTASTIC_REMOTE_GPIO_BUTTON && defined(ARCH_ESP32)
+    remoteGpioButtonModule = new RemoteGpioButtonModule();
+#endif
 #if !MESHTASTIC_EXCLUDE_POWERSTRESS
     new PowerStressModule();
 #endif
@@ -296,5 +313,6 @@ void setupModules()
 #endif
     // NOTE! This module must be added LAST because it likes to check for replies from other modules and avoid sending extra
     // acks
+	signalReplyModule = new SignalReplyModule();
     routingModule = new RoutingModule();
 }

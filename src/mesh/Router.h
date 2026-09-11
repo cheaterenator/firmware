@@ -125,6 +125,13 @@ class Router : protected concurrency::OSThread, protected PacketHistory
         before us */
     uint32_t rxDupe = 0, txRelayCanceled = 0;
 
+    /* Statistics consumed by OnDemandModule (NodeStats / RoutingErrors responses) */
+    uint32_t flood_counter = 0, nexthop_counter = 0;
+    uint32_t blocked_by_hoplimit = 0;
+    /* Indexed by meshtastic_Routing_Error; sized to the current enum's highest value (39) + 1 so a
+       future error code can't write past the end. */
+    uint32_t packetErrorCounters[40] = {};
+
   protected:
     friend class RoutingModule;
 

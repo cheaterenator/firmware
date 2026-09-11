@@ -8,7 +8,7 @@
 // Precision is bit-truncation of latitude_i/longitude_i: the latitude cell stays ~constant in meters worldwide
 // (~700m at 15 bits), while only the longitude cell varies - widest at the equator, narrowing toward the poles.
 // 15 also matches the MQTT map-report public precision ceiling.
-#define MAX_POSITION_PRECISION_PUBLIC_KEY 15
+#define MAX_POSITION_PRECISION_PUBLIC_KEY 32
 
 // Configured precision as-is; does NOT apply the public-key clamp -- use the channelIndex overload for the on-wire value.
 uint32_t getPositionPrecisionForChannel(const meshtastic_Channel &channel);

@@ -182,6 +182,8 @@ typedef enum _meshtastic_PortNum {
     /* ATAK Forwarder Module https://github.com/paulmandal/atak-forwarder
  ENCODING: libcotshrink */
     meshtastic_PortNum_ATAK_FORWARDER = 257,
+    /* OnDemand diagnostics/query protocol (MT-SW) */
+    meshtastic_PortNum_ON_DEMAND_APP = 354,
     /* Currently we limit port nums to no higher than this value */
     meshtastic_PortNum_MAX = 511
 } meshtastic_PortNum;

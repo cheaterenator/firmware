@@ -165,7 +165,7 @@ void PowerTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiState *s
 
     // Display current and voltage based on ...power_metrics.has_[channel/voltage/current]... flags
     const auto &m = lastMeasurement.variant.power_metrics;
-    int lineY = graphics::getTextPositions(display)[line];
+    int lineY = textSecondLine;
 
     auto drawLine = [&](const char *label, float voltage, float current) {
         char lineStr[64];

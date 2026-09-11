@@ -146,6 +146,37 @@ void test_monotonic_misses_a_wrap_not_serviced_within_the_window()
     TEST_ASSERT_EQUAL_UINT64(1000u, Time::getMillisMonotonic()); // the elapsed 2^32 ms is lost
 }
 
+// Field report: millis() ticked backward by a few ms (clock-domain jitter, not a real wrap), and the
+// wrap carry mistook it for one, permanently adding ~49.7 days to every later reading - the app kept
+// showing "49d ..." uptime while the device's own screen (which formats raw millis(), bypassing this
+// carry entirely) stayed correct. A small backward tick must be a no-op instead.
+void test_monotonic_ignores_small_backward_tick_of_millis()
+{
+    Time::setTestMillis(1517000u); // ~25m17s, matching the last-good reading in the field report
+    Time::serviceMonotonic();
+    TEST_ASSERT_EQUAL_UINT32(1517u, Time::getUptimeSecs());
+
+    Time::setTestMillis(1516995u); // millis() ticked backward by 5ms - jitter, not a wrap
+    Time::serviceMonotonic();
+    TEST_ASSERT_EQUAL_UINT32(1517u, Time::getUptimeSecs()); // held, not credited with +49.7 days
+
+    // Real time keeps moving forward right after the glitch, as it would on hardware.
+    Time::setTestMillis(1518000u);
+    Time::serviceMonotonic();
+    TEST_ASSERT_EQUAL_UINT32(1518u, Time::getUptimeSecs());
+}
+
+// The same glitch, observed by a pure reader with no intervening publish - readers must not see a
+// transient +49.7 day spike either.
+void test_monotonic_reader_ignores_small_backward_tick_without_a_publish()
+{
+    Time::setTestMillis(1517000u);
+    Time::serviceMonotonic();
+
+    Time::setTestMillis(1516995u); // backward tick observed only by a reader, never published
+    TEST_ASSERT_EQUAL_UINT64(1517000u, Time::getMillisMonotonic());
+}
+
 void test_getUptimeSecs_stays_exact_across_the_wrap()
 {
     Time::setTestMillis(4294967000u); // 4294967 whole seconds, 296ms short of the wrap
@@ -343,6 +374,8 @@ void setup()
     RUN_TEST(test_monotonic_reads_do_not_advance_the_carry);
     RUN_TEST(test_monotonic_counts_every_wrap_when_serviced_each_window);
     RUN_TEST(test_monotonic_misses_a_wrap_not_serviced_within_the_window);
+    RUN_TEST(test_monotonic_ignores_small_backward_tick_of_millis);
+    RUN_TEST(test_monotonic_reader_ignores_small_backward_tick_without_a_publish);
     RUN_TEST(test_getUptimeSecs_stays_exact_across_the_wrap);
     RUN_TEST(test_monotonic_exact_with_concurrent_readers);
     RUN_TEST(test_monotonic_reader_completes_while_publish_is_paused);

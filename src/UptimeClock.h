@@ -53,6 +53,10 @@ uint32_t getMillis();
 ///
 /// Not intended for ISR call sites because lock-free std::atomic operations are not guaranteed by
 /// every supported toolchain. ISRs use getMillis(); the publication protocol itself never waits.
+/// in UptimeClock.cpp.
+///
+/// Not intended for ISR call sites because lock-free std::atomic operations are not guaranteed by
+/// every supported toolchain. ISRs use getMillis(); the publication protocol itself never waits.
 uint64_t getMillisMonotonic();
 
 /// Whole seconds since boot, derived from getMillisMonotonic() (~136 years of range). This is

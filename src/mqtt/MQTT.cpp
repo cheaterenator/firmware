@@ -22,9 +22,6 @@
 #endif
 #if HAS_ETHERNET && defined(ARCH_ESP32)
 #include <ETH.h>
-#if HAS_ETHERNET && defined(ETH_SHARED_SPI)
-#include "platform/esp32/SharedBusEthernet.h"
-#endif
 #endif // HAS_ETHERNET
 #if HAS_ETHERNET && defined(USE_CH390D)
 #include "ESP32_CH390.h"
@@ -709,6 +706,14 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
         return;
     }
 #endif
+// Never uplink a packet addressed to a specific node (a DM) to MQTT, regardless of channel
+    // uplink settings or PKI status. Only broadcasts (telemetry, position, public channel chat)
+    // should ever reach the broker. Without this, a DM sent TO us - which we've already decrypted
+    // locally to show on screen - gets republished in plaintext the moment our node acts as gateway.
+    if (!isBroadcast(mp_decoded.to)) {
+        LOG_DEBUG("MQTT onSend - Suppress private (non-broadcast) packet from uplink");
+        return;
+    }
     bool uplinkEnabled = false;
     for (int i = 0; i <= 7; i++) {
         if (channels.getByIndex(i).settings.uplink_enabled)
@@ -798,7 +803,7 @@ void MQTT::perhapsReportToMap()
 
     // Coerce the map position precision to be within the valid range
     // This removes obtusely large radius and privacy problematic ones from the map
-    if (map_position_precision < 12 || map_position_precision > 15) {
+    if (map_position_precision < 12 || map_position_precision > 40) {
         LOG_WARN("MQTT Map report position precision %u out of range, use default %u", map_position_precision,
                  default_map_position_precision);
         map_position_precision = default_map_position_precision;

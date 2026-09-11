@@ -1,0 +1,94 @@
+# trunk-ignore-all(checkov/CKV_GHA_7): fork-only manual release inputs, not used upstream
+
+name: Fork Release Windows
+
+# Build the native Windows binary (meshtasticd.exe + MSI) and publish it as a
+# GitHub Release in THIS repository only - same principle as fork_release.yml:
+# a separate file (no merge conflicts with upstream), workflow_dispatch only,
+# and it only calls the existing build_windows_bin.yml reusable workflow
+# (unmodified) then attaches the result to a Release on ${{ github.repository }}.
+# No step reaches outside this repository.
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        type: boolean
+        default: true
+        description: Create the Release as a draft so you can review it before publishing.
+
+run-name: "Fork Release Windows on ${{ github.repository }}"
+
+concurrency:
+  group: fork-release-windows-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions: read-all
+
+jobs:
+  version:
+    if: github.repository_owner != 'meshtastic'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Get release version string
+        id: version
+        run: echo "long=$(./bin/buildinfo.py long)" >> "$GITHUB_OUTPUT"
+        env:
+          BUILD_LOCATION: local
+    outputs:
+      long: ${{ steps.version.outputs.long }}
+
+  build:
+    if: github.repository_owner != 'meshtastic'
+    needs: version
+    # Reused as-is: same reusable workflow main_matrix.yml calls for the
+    # 'Windows' job. Only builds and uploads workflow artifacts.
+    uses: ./.github/workflows/build_windows_bin.yml
+    with:
+      windows_ver: "2025"
+
+  release:
+    if: github.repository_owner != 'meshtastic'
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create/update the Release on this repository.
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v8
+        with:
+          name: firmware-windows-2025-${{ needs.version.outputs.long }}
+          path: ./output/exe
+          merge-multiple: true
+
+      - name: Download MSI + winget manifests
+        uses: actions/download-artifact@v8
+        with:
+          name: meshtasticd-msi-2025-${{ needs.version.outputs.long }}
+          path: ./output/msi
+          merge-multiple: true
+
+      - name: Show downloaded files
+        run: ls -lR ./output
+
+      - name: Package
+        run: |
+          zip -j -9 -r "meshtasticd-windows-${{ needs.version.outputs.long }}.zip" ./output/exe
+          zip -9 -r "meshtasticd-msi-${{ needs.version.outputs.long }}.zip" ./output/msi
+
+      - name: Create/update release on this repository
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: ${{ inputs.draft }}
+          prerelease: true
+          append_body: true
+          tag_name: fork-v${{ needs.version.outputs.long }}
+          name: Fork build ${{ needs.version.outputs.long }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            ### Windows
+            `meshtasticd-windows-${{ needs.version.outputs.long }}.zip` (meshtasticd.exe) and `meshtasticd-msi-${{ needs.version.outputs.long }}.zip` (installer + winget manifests) added by run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}.
+          files: |
+            meshtasticd-windows-${{ needs.version.outputs.long }}.zip
+            meshtasticd-msi-${{ needs.version.outputs.long }}.zip

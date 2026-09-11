@@ -19,9 +19,9 @@ class NodeInfoModule : public ProtobufModule<meshtastic_User>, private concurren
     NodeInfoModule();
 
     /**
-     * Send our NodeInfo into the mesh. True only when a packet was handed to the router.
+     * Send our NodeInfo into the mesh
      */
-    bool sendOurNodeInfo(NodeNum dest = NODENUM_BROADCAST, bool wantReplies = false, uint8_t channel = 0,
+    void sendOurNodeInfo(NodeNum dest = NODENUM_BROADCAST, bool wantReplies = false, uint8_t channel = 0,
                          bool _shorterTimeout = false);
 
     /**

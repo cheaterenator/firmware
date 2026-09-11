@@ -179,8 +179,10 @@ CALL :LOG_MESSAGE DEBUG "Computed PROGNAME: !PROGNAME!"
 SET "OTA_FILENAME=mt-!MCU!-ota.bin"
 CALL :LOG_MESSAGE DEBUG "Set OTA_FILENAME to: !OTA_FILENAME!"
 
-@REM Set SPIFFS filename with "littlefs-" prefix.
-SET "SPIFFS_FILENAME=littlefs-!PROGNAME:firmware-=!.bin"
+@REM Set SPIFFS filename by swapping the "firmware-" marker for "littlefs-"
+@REM (matches the substitution PlatformIO does in bin/platformio-pre.py, so
+@REM any custom OUTPUT_NAME_PREFIX stamped before "firmware-" is preserved).
+SET "SPIFFS_FILENAME=!PROGNAME:firmware-=littlefs-!.bin"
 CALL :LOG_MESSAGE DEBUG "Set SPIFFS_FILENAME to: !SPIFFS_FILENAME!"
 
 CALL :LOG_MESSAGE DEBUG "Set OTA_OFFSET to: !OTA_OFFSET!"
