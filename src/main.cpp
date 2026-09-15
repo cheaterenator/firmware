@@ -76,12 +76,6 @@ NimbleBluetooth *nimbleBluetooth = nullptr;
 NRF52Bluetooth *nrf52Bluetooth = nullptr;
 #endif
 
-#ifdef ARCH_NRF54L15
-void nrf54l15Setup();
-void nrf54l15Loop();
-NRF54L15Bluetooth *nrf54l15Bluetooth = nullptr;
-#endif
-
 #ifdef MESHTASTIC_ENABLE_APPROTECT
 #include "security/APProtect.h"
 #endif
@@ -947,9 +941,6 @@ void setup()
 #ifdef ARCH_NRF52
     nrf52Setup();
 #endif
-#ifdef ARCH_NRF54L15
-    nrf54l15Setup();
-#endif
 
 #ifdef ARCH_RP2040
     rp2040Setup();
@@ -1572,9 +1563,6 @@ void loop()
 #endif
 #ifdef ARCH_NRF52
     nrf52Loop();
-#endif
-#ifdef ARCH_NRF54L15
-    nrf54l15Loop();
 #endif
 #ifdef ARCH_RP2040
     rp2040Loop();
