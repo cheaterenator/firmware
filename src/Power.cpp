@@ -19,6 +19,7 @@
 #include "NodeDB.h"
 #include "PowerFSM.h"
 #include "Throttle.h"
+#include "UptimeClock.h"
 #include "WaypointStore.h"
 #include "buzz/buzz.h"
 #include "configuration.h"
@@ -1255,7 +1256,7 @@ void Power::logHeapUsage()
         LOG_INFO("Heap: %u/%u bytes free (%d since last)", heapFree, heapTotal, delta);
 
     lastHeapLogFree = heapFree;
-    lastHeapLogTime = millis();
+    lastHeapLogTime = Time::skipZero(Time::getMillis());
 #endif
 }
 

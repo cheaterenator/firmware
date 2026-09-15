@@ -34,6 +34,7 @@ PositionModule::PositionModule()
     if (transmitHistory) {
         uint32_t restored = transmitHistory->getLastSentToMeshMillis(meshtastic_PortNum_POSITION_APP);
         if (restored != 0) {
+            // unset-sentinel-ok: the enclosing restored != 0 already rules out the unset value
             lastGpsSend = restored;
             LOG_INFO("Position: restored lastGpsSend from transmit history");
         }
@@ -540,7 +541,7 @@ int32_t PositionModule::runOnce()
     if (node == nullptr)
         return RUNONCE_INTERVAL;
 
-    uint32_t now = millis();
+    uint32_t now = Time::stampMillis();
 
     // Local-only delivery, so it runs regardless of mesh opt-in state or channel utilization.
     // Only send while the queue is empty (phone assumed connected), like telemetry. The cadence
@@ -707,6 +708,32 @@ struct SmartPosition PositionModule::getDistanceTraveledSinceLastSend(meshtastic
                          .hasTraveledOverThreshold = distanceTraveled >= distanceTravelThreshold};
 }
 
+void PositionModule::trySmartBroadcast(const meshtastic_PositionLite &selfPos, uint32_t nowMs)
+{
+    auto smartPosition = getDistanceTraveledSinceLastSend(selfPos);
+    if (!smartPosition.hasTraveledOverThreshold)
+        return;
+
+    if (!Throttle::hasElapsed(lastGpsSend, minimumTimeThreshold)) {
+        LOG_DEBUG_GPS("Skip smart broadcast: time throttled");
+        return;
+    }
+
+    uint32_t msSinceLastSend = nowMs - lastGpsSend;
+    if (!sendOurPosition())
+        return;
+
+    lastGpsSend = Time::skipZero(nowMs); // nowMs is a parameter, so guard at the store as well
+    if (transmitHistory)
+        transmitHistory->setLastSentToMesh(meshtastic_PortNum_POSITION_APP);
+    LOG_DEBUG("Sent smart pos@%x:6 to mesh (distanceTraveled=%fm, minDistanceThreshold=%im, timeElapsed=%ims, "
+              "minTimeInterval=%ims)",
+              localPosition.timestamp, smartPosition.distanceTraveled, smartPosition.distanceThreshold, msSinceLastSend,
+              minimumTimeThreshold);
+    lastGpsLatitude = selfPos.latitude_i;
+    lastGpsLongitude = selfPos.longitude_i;
+}
+
 void PositionModule::handleNewPosition()
 {
     const meshtastic_NodeInfoLite *node = nodeDB->getMeshNode(nodeDB->getNodeNum());
@@ -716,21 +743,7 @@ void PositionModule::handleNewPosition()
         meshtastic_PositionLite selfPos;
         if (!nodeDB->copyNodePosition(node->num, selfPos))
             return;
-        auto smartPosition = getDistanceTraveledSinceLastSend(selfPos);
-        uint32_t msSinceLastSend = millis() - lastGpsSend;
-        if (smartPosition.hasTraveledOverThreshold &&
-            Throttle::execute(
-                &lastGpsSend, minimumTimeThreshold, []() { positionModule->sendOurPosition(); },
-                []() { LOG_DEBUG_GPS("Skip smart broadcast: time throttled"); })) {
-            LOG_DEBUG("Sent smart pos@%x:6 to mesh (distanceTraveled=%fm, minDistanceThreshold=%im, timeElapsed=%ims, "
-                      "minTimeInterval=%ims)",
-                      localPosition.timestamp, smartPosition.distanceTraveled, smartPosition.distanceThreshold, msSinceLastSend,
-                      minimumTimeThreshold);
-
-            // Set the current coords as our last ones, after we've compared distance with current and decided to send
-            lastGpsLatitude = selfPos.latitude_i;
-            lastGpsLongitude = selfPos.longitude_i;
-        }
+        trySmartBroadcast(selfPos, Time::stampMillis());
     }
 }
 
