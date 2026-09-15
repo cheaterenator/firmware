@@ -96,9 +96,17 @@ bool ReliableRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
        Now for all other pending retransmissions, we have to add the airtime of this received packet to the retransmission timer,
        because while receiving this packet, we could not have received an (implicit) ACK for it.
        If we don't add this, we will likely retransmit too early.
+
+       Only an over-the-air arrival blocks the receiver, so only TRANSPORT_LORA earns the credit. A packet handed to us by
+       UDP multicast, MQTT or the phone occupied no receive window at all - charging it the LoRa airtime of an equivalent
+       frame pushes every pending deadline out for time the radio spent listening, not receiving. With UDP multicast enabled
+       that is doubly wrong: the same packet is delivered once over UDP and again over LoRa, so the LoRa copy pays the bill
+       a second time and a reliable unicast can burn its whole attempt budget without a single retry going out on schedule.
     */
-    for (auto i = pending.begin(); i != pending.end(); i++) {
-        i->second.nextTxMsec += iface->getPacketTime(p, true);
+    if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA) {
+        for (auto i = pending.begin(); i != pending.end(); i++) {
+            i->second.nextTxMsec += iface->getPacketTime(p, true);
+        }
     }
 
     return isBroadcast(p->to) ? FloodingRouter::shouldFilterReceived(p) : NextHopRouter::shouldFilterReceived(p);

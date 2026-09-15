@@ -205,6 +205,9 @@ class RadioInterface
     /** The delay to use for retransmitting dropped packets */
     [[nodiscard]] uint32_t getRetransmissionMsec(const meshtastic_MeshPacket *p);
 
+    /** True when this node is the origin of the packet, rather than relaying one another node sent */
+    [[nodiscard]] static bool isLocallyOriginated(const meshtastic_MeshPacket *p);
+
     /** The delay to use when we want to send something */
     [[nodiscard]] uint32_t getTxDelayMsec();
 

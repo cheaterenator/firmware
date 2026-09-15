@@ -837,6 +837,33 @@ void test_receive_extends_all_pending_deadlines(void)
     TEST_ASSERT_EQUAL_UINT32(bBefore + 40000, reliableShim->pendingNextTx(kLocalNode, b.id));
 }
 
+void test_receive_off_air_does_not_extend_pending_deadlines(void)
+{
+    // A packet handed to us by UDP multicast (or MQTT, or the phone) never occupied the receive
+    // window, so it must not push the pending retransmissions out. Charging it would double-bill
+    // every packet that arrives over both UDP and LoRa and starve the reliable retry schedule.
+    radio->packetTimeMsec = 40000;
+
+    auto a = makeDecodedPacket(meshtastic_PortNum_TEXT_MESSAGE_APP, kLocalNode, kRemoteNode, 1, /*wantAck=*/true);
+    reliableShim->seedRetry(a, NextHopRouter::NUM_RELIABLE_UNICAST_ATTEMPTS);
+    uint32_t aBefore = reliableShim->pendingNextTx(kLocalNode, a.id);
+
+    auto viaUdp = makeDecodedPacket(meshtastic_PortNum_TELEMETRY_APP, kRemoteNode, kLocalNode, 1, /*wantAck=*/false);
+    viaUdp.transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP;
+    reliableShim->filterForTest(&viaUdp);
+    TEST_ASSERT_EQUAL_UINT32(aBefore, reliableShim->pendingNextTx(kLocalNode, a.id));
+
+    auto viaMqtt = makeDecodedPacket(meshtastic_PortNum_TELEMETRY_APP, kThirdNode, kLocalNode, 1, /*wantAck=*/false);
+    viaMqtt.transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MQTT;
+    reliableShim->filterForTest(&viaMqtt);
+    TEST_ASSERT_EQUAL_UINT32(aBefore, reliableShim->pendingNextTx(kLocalNode, a.id));
+
+    // The LoRa copy of that same UDP arrival still pays, exactly once.
+    auto viaLora = makeDecodedPacket(meshtastic_PortNum_TELEMETRY_APP, kRemoteNode, kLocalNode, 1, /*wantAck=*/false);
+    reliableShim->filterForTest(&viaLora);
+    TEST_ASSERT_EQUAL_UINT32(aBefore + 40000, reliableShim->pendingNextTx(kLocalNode, a.id));
+}
+
 // ===========================================================================
 
 void setup()
@@ -897,6 +924,7 @@ void setup()
     printf("\n=== pending-timer airtime extension ===\n");
     RUN_TEST(test_send_extends_other_pending_deadlines_not_own);
     RUN_TEST(test_receive_extends_all_pending_deadlines);
+    RUN_TEST(test_receive_off_air_does_not_extend_pending_deadlines);
 
     int result = UNITY_END();
     airTimeFixture.reset();

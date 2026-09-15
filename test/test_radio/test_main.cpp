@@ -9,8 +9,23 @@
 
 #include "meshtastic/config.pb.h"
 #include "support/MockMeshService.h"
+#include <memory>
 
 static MockMeshService *mockMeshService;
+
+// getTxDelayMsec() reads channel utilization off the airTime global, which is NULL by default.
+class ScopedAirTimeFixture
+{
+  public:
+    ScopedAirTimeFixture() : previous(airTime) { airTime = &instance; }
+    ~ScopedAirTimeFixture() { airTime = previous; }
+
+  private:
+    AirTime instance;
+    AirTime *previous;
+};
+
+static std::unique_ptr<ScopedAirTimeFixture> airTimeFixture;
 
 static void test_lr20x0BandClassification()
 {
@@ -61,6 +76,9 @@ class TestableRadioInterface : public RadioInterface
     uint8_t getCr() const { return cr; }
     uint8_t getSf() const { return sf; }
     float getBw() const { return bw; }
+
+    uint32_t getSlotTimeMsec() const { return slotTimeMsec; }
+    static constexpr uint8_t cwMax() { return CWmax; }
 
     size_t beginSendingPublic(meshtastic_MeshPacket *p) { return beginSending(p); }
     meshtastic_MeshPacket *getSendingPacket() const { return sendingPacket; }
@@ -473,6 +491,78 @@ static void test_beginSending_fittingPayloadIsSentWhole()
     testRadio->clearSendingPacketForTest();
     packetPool.release(p);
 }
+
+// ---------------------------------------------------------------------------
+// TX-delay provenance. setTransmitDelay() used to infer "we wrote this packet" from
+// rx_snr == 0 && rx_rssi == 0, which is also what every off-air arrival looks like: UDP multicast
+// and MQTT carry no RF measurement at all. Relaying one was therefore scheduled in the originator's
+// own contention window instead of behind it. isLocallyOriginated() asks transport_mechanism.
+// ---------------------------------------------------------------------------
+
+/// Carries rx_snr == 0 && rx_rssi == 0 - the exact shape the old heuristic read as ours.
+static meshtastic_MeshPacket makeUnmeasuredPacket(meshtastic_MeshPacket_TransportMechanism transport)
+{
+    meshtastic_MeshPacket p = meshtastic_MeshPacket_init_zero;
+    p.from = 0x22222222;
+    p.id = 0x0BADF00D;
+    p.hop_start = 3;
+    p.hop_limit = 3;
+    p.transport_mechanism = transport;
+    return p;
+}
+
+static bool locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism transport)
+{
+    meshtastic_MeshPacket p = makeUnmeasuredPacket(transport);
+    return RadioInterface::isLocallyOriginated(&p);
+}
+
+static void test_isLocallyOriginated_readsProvenanceNotRfFields()
+{
+    // Ours: nothing arrived, we are the author. TRANSPORT_API is a local client handing us a packet
+    // over the packet API, which we then originate.
+    TEST_ASSERT_TRUE(locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism_TRANSPORT_INTERNAL));
+    TEST_ASSERT_TRUE(locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism_TRANSPORT_API));
+
+    // Someone else's, whatever carried it here - all four with no RF measurement to tell them apart.
+    TEST_ASSERT_FALSE(locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA));
+    TEST_ASSERT_FALSE(locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP));
+    TEST_ASSERT_FALSE(locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism_TRANSPORT_UNICAST_UDP));
+    TEST_ASSERT_FALSE(locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MQTT));
+
+    // A transport this firmware does not set today, and whatever a client may put in the field,
+    // count as a relay: backing off too much costs latency, backing off too little costs collisions.
+    TEST_ASSERT_FALSE(locallyOriginatedFor(meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA_ALT1));
+}
+
+static void test_offAirRelayCannotPreemptTheOriginator()
+{
+    const auto previousRole = config.device.role;
+    config.device.role = meshtastic_Config_DeviceConfig_Role_CLIENT; // ROUTER is the one role that relays early
+
+    // The invariant: every relay delay clears the router offset, so a relay always lands after the
+    // window an origination draws from. Both halves are randomised, so sample rather than compare once.
+    const uint32_t relayFloor = 2 * TestableRadioInterface::cwMax() * testRadio->getSlotTimeMsec();
+    const meshtastic_MeshPacket_TransportMechanism offAir[] = {
+        meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP,
+        meshtastic_MeshPacket_TransportMechanism_TRANSPORT_UNICAST_UDP,
+        meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MQTT};
+
+    for (auto transport : offAir) {
+        meshtastic_MeshPacket p = makeUnmeasuredPacket(transport);
+        for (int i = 0; i < 32; i++)
+            TEST_ASSERT_GREATER_OR_EQUAL_UINT32(relayFloor, testRadio->getTxDelayMsecWeighted(&p));
+    }
+
+    // Asserted, not assumed: the origination window is CWmin-wide only while the channel is idle, and
+    // this pins the reason the misclassification was harmful rather than merely inaccurate.
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, airTime->channelUtilizationPercent());
+    for (int i = 0; i < 32; i++)
+        TEST_ASSERT_LESS_THAN_UINT32(relayFloor, testRadio->getTxDelayMsec());
+
+    config.device.role = previousRole;
+}
+
 void setUp(void)
 {
     mockMeshService = new MockMeshService();
@@ -501,6 +591,7 @@ void setup()
     initializeTestEnvironment();
 
     UNITY_BEGIN();
+    airTimeFixture = std::make_unique<ScopedAirTimeFixture>();
     RUN_TEST(test_lr20x0BandClassification);
     RUN_TEST(test_lr20x0BandHopDetection);
     RUN_TEST(test_lr20x0ReconfigurePathSelection);
@@ -525,7 +616,11 @@ void setup()
     RUN_TEST(test_regionPresetMap_unsetCarriesUserprefsIntent);
     RUN_TEST(test_beginSending_oversizedPayloadIsClamped);
     RUN_TEST(test_beginSending_fittingPayloadIsSentWhole);
-    exit(UNITY_END());
+    RUN_TEST(test_isLocallyOriginated_readsProvenanceNotRfFields);
+    RUN_TEST(test_offAirRelayCannotPreemptTheOriginator);
+    const int result = UNITY_END();
+    airTimeFixture.reset();
+    exit(result);
 }
 
 void loop() {}

@@ -812,6 +812,30 @@ uint32_t RadioInterface::getRetransmissionMsec(const meshtastic_MeshPacket *p)
            PROCESSING_TIME_MSEC;
 }
 
+/** True when this node is the origin of the packet, rather than relaying one another node sent.
+ *
+ * Only an origination may use the short getTxDelayMsec() backoff. A relay has to sit out the
+ * 2 * CWmax slot offset that getTxDelayMsecWeighted() adds, otherwise it transmits inside the
+ * originator's own contention window and the two copies race each other instead of flooding outward.
+ *
+ * This used to be inferred from `rx_snr == 0 && rx_rssi == 0`, on the theory that the radio's
+ * noise-floor offset keeps a genuine reception from ever reading as exactly zero. That holds for LoRa
+ * and for nothing else: a packet that reached us over UDP multicast or MQTT carries no RF measurement
+ * at all (UdpMulticastHandler::onReceive() zeroes both fields explicitly, MQTT::onReceive() allocates
+ * them zeroed), so relaying one was scheduled as if we had written it - and every off-air-fed relay
+ * beat every LoRa-fed relay onto the air by that whole offset. transport_mechanism records provenance
+ * directly, which is what the question was always about, so ask it instead of guessing from the RF fields.
+ *
+ * TRANSPORT_API counts as ours: a local client handed us that packet over the packet API and we are
+ * its originator. Everything else - including a transport this firmware does not set yet, and whatever
+ * a client may put in the field - counts as a relay, because that is the safe direction for the channel.
+ */
+bool RadioInterface::isLocallyOriginated(const meshtastic_MeshPacket *p)
+{
+    return p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_INTERNAL ||
+           p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_API;
+}
+
 /** The delay to use when we want to send something */
 uint32_t RadioInterface::getTxDelayMsec()
 {

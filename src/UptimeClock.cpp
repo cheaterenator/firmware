@@ -28,21 +28,8 @@ std::atomic<Time::MonotonicPublishHook> monotonicPublishHook{nullptr};
 
 // Extend a published (high, low) snapshot to `now`; unsigned subtraction is exact across the wrap
 // for any gap under 49.7 days. One copy, because reader and writer must agree on it exactly.
-// the last published `low`, exactly like a genuine 2^32 wrap does - unsigned subtraction alone can't
-// tell them apart. Magnitude does: a real glitch is a tick or two, while a genuine wrap leaves `low`
-// enormously larger than `now`, because `low` had to already be near UINT32_MAX for the wrap to have
-// happened between two calls this close together. Below this, treat it as noise; at or above it,
-// trust the wrap. Generous margin either way - real jitter is sub-millisecond to a few ms at worst,
-// and a real wrap's gap is never under ~4.29 billion ms short of this tolerance.
-constexpr uint32_t kClockJitterToleranceMs = 5000;
-
-// Extend a published (high, low) snapshot to `now`; unsigned subtraction is exact across the wrap
-// for any gap under 49.7 days. One copy, because reader and writer must agree on it exactly.
 uint64_t extendPublished(uint32_t high, uint32_t low, uint32_t now)
 {
-    if (now < low && (low - now) <= kClockJitterToleranceMs)
-        return (((uint64_t)high << 32) | low); // clock noise, not a wrap: hold, don't credit +49.7 days
-
     return ((((uint64_t)high << 32) | low) + (uint32_t)(now - low));
 }
 
