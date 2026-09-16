@@ -42,31 +42,14 @@ void AirTime::Windows::logAirtime(reportTypes reportType, uint32_t airtime_ms, c
     if (reportType == TX_LOG) {
         this->airtimes.periodTX[0] = this->airtimes.periodTX[0] + airtime_ms;
         this->utilizationTX[this->getPeriodUtilHour(held)] += airtime_ms;
-        this->txAccum10 += airtime_ms; // MT-SW/fw+
     } else if (reportType == RX_LOG) {
         this->airtimes.periodRX[0] = this->airtimes.periodRX[0] + airtime_ms;
-        this->rxAccum10 += airtime_ms; // MT-SW/fw+
-        this->rxWindowSum += airtime_ms; // MT-SW/fw+
-        this->rxWindowCount++;           // MT-SW/fw+
     } else if (reportType == RX_ALL_LOG) {
         this->airtimes.periodRX_ALL[0] = this->airtimes.periodRX_ALL[0] + airtime_ms;
-        this->rxBadAccum10 += airtime_ms; // MT-SW/fw+
-        this->rxWindowSum += airtime_ms;  // MT-SW/fw+ (fw+ counts RX_LOG and RX_ALL_LOG together here)
-        this->rxWindowCount++;            // MT-SW/fw+
     }
 
     // Log all airtime type for channel utilization
     this->channelUtilization[this->getPeriodUtilMinute(held)] += airtime_ms;
-}
-
-// MT-SW/fw+: NOT called from logAirtime() above - packet counting, not airtime duration. Router calls
-// this directly (once per RX+TX mesh packet) via AirTime::logPacketSeen().
-void AirTime::Windows::logPacketSeen(const Held &held)
-{
-    // Same reasoning as logAirtime(): a packet may be logged immediately after waking from light
-    // sleep, so sync first to land in the current window, not a stale one.
-    syncNow(held);
-    this->packetCount10++;
 }
 
 uint8_t AirTime::Windows::getPeriodUtilMinute(const Held &)
@@ -91,12 +74,6 @@ void AirTime::Windows::syncNow(const Held &held)
         memset(this->airtimes.periodTX, 0, sizeof(this->airtimes.periodTX));
         memset(this->airtimes.periodRX, 0, sizeof(this->airtimes.periodRX));
         memset(this->airtimes.periodRX_ALL, 0, sizeof(this->airtimes.periodRX_ALL));
-        memset(this->activityWindow, 0, sizeof(this->activityWindow));     // MT-SW/fw+
-        memset(this->rxWindowAverages, 0, sizeof(this->rxWindowAverages)); // MT-SW/fw+
-        memset(this->packetCountWindow, 0, sizeof(this->packetCountWindow)); // MT-SW/fw+
-        this->txAccum10 = this->rxAccum10 = this->rxBadAccum10 = 0;        // MT-SW/fw+
-        this->rxWindowSum = this->rxWindowCount = 0;                       // MT-SW/fw+
-        this->packetCount10 = 0;                                           // MT-SW/fw+
 
         this->secSinceBoot = nowSecs;
         firstTime = false;
@@ -157,80 +134,6 @@ void AirTime::Windows::syncNow(const Held &held)
             this->utilizationTX[((oldSecSinceBoot / 60) + i) % MINUTES_IN_HOUR] = 0;
         }
     }
-
-    // MT-SW/fw+: 10-minute activity window (tx/rx/rx_bad/idle time) and RX-average-airtime window.
-    // Ported from the historical fw+ AirTime, but rotated on this same monotonic-crossing discipline
-    // as the blocks above instead of fw+'s original `secSinceBoot % RX_WINDOW_INTERVAL_SECONDS == 0`
-    // OSThread-tick check - that trigger silently stalls across light sleep (a paused scheduler skips
-    // ticks and never lands exactly on a multiple), the same bug class this class's rewrite fixed for
-    // channelUtilization/utilizationTX above.
-    //
-    // activityWindow (10 slots) and rxWindowAverages (40 slots) roll over on the exact same boundary,
-    // but must be bulk-cleared independently: sleeping through 15 windows clears the shorter
-    // activityWindow (>= 10) while rxWindowAverages (>= 40) still needs its normal shift-loop.
-    uint32_t elapsedActivityWindows =
-        (this->secSinceBoot / RX_WINDOW_INTERVAL_SECONDS) - (oldSecSinceBoot / RX_WINDOW_INTERVAL_SECONDS);
-    if (elapsedActivityWindows > 0) {
-        bool clearActivity = elapsedActivityWindows >= ACTIVITY_WINDOW_COUNT;
-        bool clearRxAvg = elapsedActivityWindows >= RX_WINDOW_COUNT;
-        bool clearPacketCount = elapsedActivityWindows >= RXTXALL_ACTIVITY_COUNT;
-
-        if (clearActivity)
-            memset(this->activityWindow, 0, sizeof(this->activityWindow));
-        if (clearRxAvg)
-            memset(this->rxWindowAverages, 0, sizeof(this->rxWindowAverages));
-        if (clearPacketCount)
-            memset(this->packetCountWindow, 0, sizeof(this->packetCountWindow));
-
-        if (!clearActivity || !clearRxAvg || !clearPacketCount) {
-            for (uint32_t win = 0; win < elapsedActivityWindows; win++) {
-                // Only the first crossing carries time/count actually accumulated since the window
-                // opened; any further crossings folded into this same syncNow() call are windows we
-                // were asleep for the entirety of - genuinely idle/no-packets, not double-counted from
-                // one accumulator.
-                uint32_t tx = (win == 0) ? this->txAccum10 : 0;
-                uint32_t rx = (win == 0) ? this->rxAccum10 : 0;
-                uint32_t rxBad = (win == 0) ? this->rxBadAccum10 : 0;
-                uint32_t windowMs = RX_WINDOW_INTERVAL_SECONDS * 1000;
-                uint32_t used = tx + rx + rxBad;
-                uint32_t idle = (windowMs > used) ? (windowMs - used) : 0;
-                uint32_t rxSum = (win == 0) ? this->rxWindowSum : 0;
-                uint32_t rxCount = (win == 0) ? this->rxWindowCount : 0;
-                uint32_t rxAverage = (rxCount > 0) ? (rxSum / rxCount) : 0;
-                uint32_t packetCount = (win == 0) ? this->packetCount10 : 0;
-
-                if (!clearActivity) {
-                    for (int i = 0; i < ACTIVITY_WINDOW_COUNT - 1; i++)
-                        this->activityWindow[i] = this->activityWindow[i + 1];
-                    // Field-by-field, not `= {rx, tx, idle, rxBad};` - assigning a braced-init-list to
-                    // an existing struct lvalue is the same class of toolchain landmine hit in
-                    // OnDemandModule (see its comments): fine here in practice (no array/string members
-                    // to trip on), but not worth re-litigating per-toolchain for a form this short.
-                    ActivityTime &slot = this->activityWindow[ACTIVITY_WINDOW_COUNT - 1];
-                    slot.rx_time = rx;
-                    slot.tx_time = tx;
-                    slot.idle_time = idle;
-                    slot.rx_bad_time = rxBad;
-                }
-                if (!clearRxAvg) {
-                    for (int i = 0; i < RX_WINDOW_COUNT - 1; i++)
-                        this->rxWindowAverages[i] = this->rxWindowAverages[i + 1];
-                    this->rxWindowAverages[RX_WINDOW_COUNT - 1] = rxAverage;
-                }
-                if (!clearPacketCount) {
-                    for (int i = 0; i < RXTXALL_ACTIVITY_COUNT - 1; i++)
-                        this->packetCountWindow[i] = this->packetCountWindow[i + 1];
-                    this->packetCountWindow[RXTXALL_ACTIVITY_COUNT - 1] = packetCount;
-                }
-            }
-        }
-        this->txAccum10 = 0;
-        this->rxAccum10 = 0;
-        this->rxBadAccum10 = 0;
-        this->rxWindowSum = 0;
-        this->rxWindowCount = 0;
-        this->packetCount10 = 0;
-    }
 }
 
 bool AirTime::Windows::airtimeReport(reportTypes reportType, uint32_t *out, size_t count, const Held &held)
@@ -253,42 +156,6 @@ bool AirTime::Windows::airtimeReport(reportTypes reportType, uint32_t *out, size
         return false;
 
     memcpy(out, src, count * sizeof(*out));
-    return true;
-}
-
-bool AirTime::Windows::activityWindowReport(ActivityTime *out, size_t count, const Held &held)
-{
-    if (!out || count > ACTIVITY_WINDOW_COUNT)
-        return false;
-
-    // Reports may be requested before runOnce() executes after wake, same as airtimeReport().
-    syncNow(held);
-
-    memcpy(out, this->activityWindow, count * sizeof(*out));
-    return true;
-}
-
-bool AirTime::Windows::rxWindowAveragesReport(uint32_t *out, size_t count, const Held &held)
-{
-    if (!out || count > RX_WINDOW_COUNT)
-        return false;
-
-    // Reports may be requested before runOnce() executes after wake, same as airtimeReport().
-    syncNow(held);
-
-    memcpy(out, this->rxWindowAverages, count * sizeof(*out));
-    return true;
-}
-
-bool AirTime::Windows::packetCountWindowReport(uint32_t *out, size_t count, const Held &held)
-{
-    if (!out || count > RXTXALL_ACTIVITY_COUNT)
-        return false;
-
-    // Reports may be requested before runOnce() executes after wake, same as airtimeReport().
-    syncNow(held);
-
-    memcpy(out, this->packetCountWindow, count * sizeof(*out));
     return true;
 }
 
@@ -397,30 +264,6 @@ bool AirTime::airtimeReport(reportTypes reportType, uint32_t *out, size_t count)
 {
     Held held(this);
     return w.airtimeReport(reportType, out, count, held);
-}
-
-bool AirTime::activityWindowReport(ActivityTime *out, size_t count)
-{
-    Held held(this);
-    return w.activityWindowReport(out, count, held);
-}
-
-bool AirTime::rxWindowAveragesReport(uint32_t *out, size_t count)
-{
-    Held held(this);
-    return w.rxWindowAveragesReport(out, count, held);
-}
-
-void AirTime::logPacketSeen()
-{
-    Held held(this);
-    w.logPacketSeen(held);
-}
-
-bool AirTime::packetCountWindowReport(uint32_t *out, size_t count)
-{
-    Held held(this);
-    return w.packetCountWindowReport(out, count, held);
 }
 
 uint32_t AirTime::getSecondsSinceBoot()

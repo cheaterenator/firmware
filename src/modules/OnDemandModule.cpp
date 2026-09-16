@@ -451,7 +451,7 @@ void OnDemandModule::sendPacketToRequester(const meshtastic_OnDemand &demand_pac
                  (int)demand_packet.variant.response.response_type, mp.from);
         return;
     }
-    p->to = mp.from;
+    p->to = getFrom(&mp); // mp.from is always 0 for phone-originated requests; resolve to our own node
     p->decoded.want_response = false;
     p->want_ack = wantAck;
     p->channel = mp.channel;
