@@ -54,6 +54,9 @@ PB_BIND(meshtastic_Ping, meshtastic_Ping, AUTO)
 PB_BIND(meshtastic_OnDemandRequest, meshtastic_OnDemandRequest, AUTO)
 
 
+PB_BIND(meshtastic_SnifferState, meshtastic_SnifferState, AUTO)
+
+
 PB_BIND(meshtastic_OnDemandResponse, meshtastic_OnDemandResponse, 2)
 
 

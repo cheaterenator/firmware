@@ -831,6 +831,11 @@ extern NodeDB *nodeDB;
 extern const uint32_t MAX_PORTS;
 extern uint32_t portCounters[];
 
+/// Sniffer on/off (RAM-only - never saved to flash, so every boot starts with this false). Toggled by
+/// OnDemandModule on REQUEST_SNIFFER_ENABLE/DISABLE (local phone only); read by RoutingModule to decide
+/// whether to mirror overheard transit traffic and relayed ACK/NAK to the phone.
+extern bool snifferEnabled;
+
 /*
   If is_router is set, we use a number of different default values
 

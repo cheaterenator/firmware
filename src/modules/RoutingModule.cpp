@@ -67,7 +67,7 @@ bool RoutingModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mesh
     if ((isBroadcast(mp.to) || isToUs(&mp)) && (mp.from != 0)) {
         printPacket("Delivering rx packet", &mp);
         service->handleFromRadio(&mp);
-    } else if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled && (mp.from != 0) && !isFromUs(&mp)) {
+    } else if (snifferEnabled && (mp.from != 0) && !isFromUs(&mp)) {
         // Sniffer mode (MT-SW): forward transit traffic (not broadcast, not to us, not from us) once -
         // the branch above already covers broadcasts and packets addressed to us, so this is exactly
         // the traffic the phone would otherwise never see: something we're only relaying/overhearing.
@@ -100,7 +100,7 @@ void RoutingModule::sendAckNak(meshtastic_Routing_Error err, NodeNum to, PacketI
     // Sniffer mode (MT-SW): mirror the ACK/NAK we're about to send - sendLocal() below only reaches
     // the phone when `to` is us, so for anything addressed elsewhere this is the only copy the phone
     // would otherwise get.
-    if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled) {
+    if (snifferEnabled) {
         meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*p);
         if (copyPtr) {
             service->sendPacketToPhoneRaw(copyPtr);

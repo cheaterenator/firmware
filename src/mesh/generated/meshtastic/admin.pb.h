@@ -85,9 +85,7 @@ typedef enum _meshtastic_AdminMessage_ModuleConfigType {
     /* TAK module config */
     meshtastic_AdminMessage_ModuleConfigType_TAK_CONFIG = 15,
     /* Mesh Beacon module config */
-    meshtastic_AdminMessage_ModuleConfigType_MESHBEACON_CONFIG = 16,
-    /* Sniffer mode config (MT-SW) */
-    meshtastic_AdminMessage_ModuleConfigType_NODEMODADMIN_CONFIG = 17
+    meshtastic_AdminMessage_ModuleConfigType_MESHBEACON_CONFIG = 16
 } meshtastic_AdminMessage_ModuleConfigType;
 
 typedef enum _meshtastic_AdminMessage_BackupLocation {
@@ -566,8 +564,8 @@ extern "C" {
 #define _meshtastic_AdminMessage_ConfigType_ARRAYSIZE ((meshtastic_AdminMessage_ConfigType)(meshtastic_AdminMessage_ConfigType_DEVICEUI_CONFIG+1))
 
 #define _meshtastic_AdminMessage_ModuleConfigType_MIN meshtastic_AdminMessage_ModuleConfigType_MQTT_CONFIG
-#define _meshtastic_AdminMessage_ModuleConfigType_MAX meshtastic_AdminMessage_ModuleConfigType_NODEMODADMIN_CONFIG
-#define _meshtastic_AdminMessage_ModuleConfigType_ARRAYSIZE ((meshtastic_AdminMessage_ModuleConfigType)(meshtastic_AdminMessage_ModuleConfigType_NODEMODADMIN_CONFIG+1))
+#define _meshtastic_AdminMessage_ModuleConfigType_MAX meshtastic_AdminMessage_ModuleConfigType_MESHBEACON_CONFIG
+#define _meshtastic_AdminMessage_ModuleConfigType_ARRAYSIZE ((meshtastic_AdminMessage_ModuleConfigType)(meshtastic_AdminMessage_ModuleConfigType_MESHBEACON_CONFIG+1))
 
 #define _meshtastic_AdminMessage_BackupLocation_MIN meshtastic_AdminMessage_BackupLocation_FLASH
 #define _meshtastic_AdminMessage_BackupLocation_MAX meshtastic_AdminMessage_BackupLocation_SD

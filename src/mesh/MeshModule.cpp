@@ -248,10 +248,9 @@ void MeshModule::sendResponse(const meshtastic_MeshPacket &req)
     if (r) {
         // Sniffer mode (MT-SW): hand a copy of every locally-generated module reply to the phone
         // before it's addressed/queued for the mesh, so a connected app can observe traffic this
-        // node answers even when it isn't the intended recipient. Config-backed and persisted since
-        // localonly.proto grew LocalModuleConfig.nodemodadmin (field 19); settable via AdminMessage
-        // set_module_config like any other module. Defaults OFF (default_sniffer_enabled).
-        if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled) {
+        // node answers even when it isn't the intended recipient. snifferEnabled is RAM-only (NodeDB.h),
+        // toggled locally via OnDemandModule's REQUEST_SNIFFER_ENABLE/DISABLE, always OFF after a boot.
+        if (snifferEnabled) {
             meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*r);
             if (copyPtr) {
                 LOG_DEBUG("Sniffer: forwarding module reply portnum=%d to=0x%08x to phone", r->decoded.portnum, r->to);

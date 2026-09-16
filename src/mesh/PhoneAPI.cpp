@@ -931,11 +931,6 @@ size_t PhoneAPI::getFromRadio(uint8_t *buf)
             }
             break;
 #endif
-        case meshtastic_ModuleConfig_nodemodadmin_tag:
-            LOG_DEBUG("Send module config: nodemodadmin (sniffer)");
-            fromRadioScratch.moduleConfig.which_payload_variant = meshtastic_ModuleConfig_nodemodadmin_tag;
-            fromRadioScratch.moduleConfig.payload_variant.nodemodadmin = moduleConfig.nodemodadmin;
-            break;
         default:
             LOG_DEBUG("Unhandled module config type %d", config_state);
         }

@@ -1250,8 +1250,7 @@ bool AdminModule::handleSetModuleConfig(const meshtastic_ModuleConfig &c)
     // next PowerFSM transition. Everything else reboots, so take BLE down before the phone interferes.
     if (!hasOpenEditTransaction &&
         !IS_ONE_OF(c.which_payload_variant, meshtastic_ModuleConfig_mqtt_tag, meshtastic_ModuleConfig_serial_tag,
-                   meshtastic_ModuleConfig_statusmessage_tag, meshtastic_ModuleConfig_mesh_beacon_tag,
-                   meshtastic_ModuleConfig_nodemodadmin_tag)) {
+                   meshtastic_ModuleConfig_statusmessage_tag, meshtastic_ModuleConfig_mesh_beacon_tag)) {
         disableBluetooth();
     }
 
@@ -1366,14 +1365,6 @@ bool AdminModule::handleSetModuleConfig(const meshtastic_ModuleConfig &c)
         LOG_INFO("Set module config: TAK");
         moduleConfig.has_tak = true;
         moduleConfig.tak = c.payload_variant.tak;
-        break;
-    case meshtastic_ModuleConfig_nodemodadmin_tag:
-        // Sniffer mode (MT-SW): a single boolean read live by MeshModule::sendResponse() on every
-        // call, so there's no cached state anywhere for a reboot to refresh.
-        LOG_INFO("Set module config: NodeModAdmin (sniffer)");
-        moduleConfig.has_nodemodadmin = true;
-        moduleConfig.nodemodadmin = c.payload_variant.nodemodadmin;
-        shouldReboot = false;
         break;
 #if !MESHTASTIC_EXCLUDE_BEACON
     case meshtastic_ModuleConfig_mesh_beacon_tag: {
@@ -1684,11 +1675,6 @@ void AdminModule::handleGetModuleConfig(const meshtastic_MeshPacket &req, const 
             configName = "TAK";
             res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_tak_tag;
             res.get_module_config_response.payload_variant.tak = moduleConfig.tak;
-            break;
-        case meshtastic_AdminMessage_ModuleConfigType_NODEMODADMIN_CONFIG:
-            configName = "NodeModAdmin (sniffer)";
-            res.get_module_config_response.which_payload_variant = meshtastic_ModuleConfig_nodemodadmin_tag;
-            res.get_module_config_response.payload_variant.nodemodadmin = moduleConfig.nodemodadmin;
             break;
 #if !MESHTASTIC_EXCLUDE_BEACON
         case meshtastic_AdminMessage_ModuleConfigType_MESHBEACON_CONFIG:

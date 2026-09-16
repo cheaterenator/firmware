@@ -533,7 +533,7 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
     // Sniffer mode (MT-SW): forward our own locally-originated TX to the phone (not broadcasts -
     // those are already delivered locally) so replies/acks this node sends that never went through
     // MeshModule::sendResponse() (e.g. issued straight to Router::send()) still show up while sniffing.
-    if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled && isFromUs(p) && !isBroadcast(p->to)) {
+    if (snifferEnabled && isFromUs(p) && !isBroadcast(p->to)) {
         meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*p);
         if (copyPtr) {
             LOG_DEBUG("Sniffer: forwarding own TX portnum=%d to=0x%08x to phone",
@@ -1790,7 +1790,7 @@ void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
         // generate it here from the still-encrypted packet before opaque relay.
         if (isFromUs(p)) {
             perhapsGenerateImplicitAckForOwnOverheard(p);
-        } else if (moduleConfig.has_nodemodadmin && moduleConfig.nodemodadmin.sniffer_enabled) {
+        } else if (snifferEnabled) {
             // Sniffer mode (MT-SW): report packets we could not decode with any channel we know
             // (unknown channel hash, or a one-byte hash collision that failed decode - see
             // passesRoutingAuthGate()/perhapsDecode()). Being opaque, these never reach

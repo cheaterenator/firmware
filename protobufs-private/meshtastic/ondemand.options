@@ -1,0 +1,12 @@
+*packet_index int_size:8
+*packet_total int_size:8
+*RxPacketHistory.rx_packet_history max_count:40
+*RxAvgTimeHistory.rx_avg_history max_count:40
+*NodesList.node_list max_count:10
+*NodeEntry.long_name max_size:40
+*NodeEntry.short_name max_size:5
+*PortCountersHistory.port_counter_history max_count:20
+*ExchangeList.exchange_list max_count:12
+*AirActivityHistory.air_activity_history max_count:10
+*NodeStats.firmware_version max_size:18
+*RoutingErrorsHistory.routing_errors max_count:40

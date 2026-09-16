@@ -215,12 +215,11 @@ void setupModules()
     new RemoteHardwareModule();
 #endif
     onDemandModule = new OnDemandModule();
-    // Sniffer/OnDemand diag (MT-SW): sniffer_enabled now lives in moduleConfig.nodemodadmin
-    // (persisted, settable via AdminMessage set_module_config) - if sniffing still "doesn't work",
-    // check this line first: has_nodemodadmin should be true (installDefaultModuleConfig() sets it)
-    // and sniffer_enabled reflects whatever was last configured, default OFF.
-    LOG_INFO("OnDemand/Sniffer: onDemandModule registered on port %d, has_nodemodadmin=%d sniffer_enabled=%d",
-             meshtastic_PortNum_ON_DEMAND_APP, moduleConfig.has_nodemodadmin, moduleConfig.nodemodadmin.sniffer_enabled);
+    // Sniffer/OnDemand diag (MT-SW): snifferEnabled is a RAM-only global (NodeDB.h/.cpp), toggled via
+    // OnDemandModule's REQUEST_SNIFFER_ENABLE/DISABLE (local phone only) - always false here, since
+    // nothing loads it from flash.
+    LOG_INFO("OnDemand/Sniffer: onDemandModule registered on port %d, sniffer_enabled=%d",
+             meshtastic_PortNum_FWPLUS_APP, snifferEnabled);
 #if MESHTASTIC_REMOTE_GPIO_BUTTON && defined(ARCH_ESP32)
     remoteGpioButtonModule = new RemoteGpioButtonModule();
 #endif

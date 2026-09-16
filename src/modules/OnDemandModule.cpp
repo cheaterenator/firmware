@@ -23,7 +23,10 @@ OnDemandModule *onDemandModule;
 static const size_t MAX_PACKET_SIZE = 190;
 #define NUM_ONLINE_SECS (60 * 60 * 2)
 #define ONDEMAND_MAGIC_USB_BATTERY_LEVEL 101
-#define FW_PLUS_VERSION 1
+// Capability signal for the companion app: bump whenever a query/command is added to this protocol so
+// the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 3 = adds
+// REQUEST_SNIFFER_ENABLE/DISABLE/STATE.
+#define FW_PLUS_VERSION 3
 
 bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_OnDemand *t)
 {
@@ -67,6 +70,23 @@ bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
         break;
     case meshtastic_OnDemandType_REQUEST_PACKET_RX_HISTORY:
         sendPacketToRequester(prepareRxPacketHistory(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_SNIFFER_ENABLE:
+    case meshtastic_OnDemandType_REQUEST_SNIFFER_DISABLE:
+        // Local-only: sniffer forwards overheard mesh traffic to whatever's on the other end of this
+        // link, so only the phone actually attached to this node (mp.from == 0) may flip it - a remote
+        // mesh node asking for it is silently ignored (falls through to the state response below,
+        // reporting whatever the flag already was).
+        if (mp.from == 0) {
+            snifferEnabled = (t->variant.request.request_type == meshtastic_OnDemandType_REQUEST_SNIFFER_ENABLE);
+            LOG_INFO("OnDemand: sniffer_enabled set to %d (local request)", snifferEnabled);
+        } else {
+            LOG_WARN("OnDemand: ignoring sniffer enable/disable from remote node 0x%08x (local-only)", mp.from);
+        }
+        sendPacketToRequester(prepareSnifferState(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_SNIFFER_STATE:
+        sendPacketToRequester(prepareSnifferState(), mp);
         break;
     default: {
         meshtastic_OnDemand unknown = meshtastic_OnDemand_init_zero;
@@ -438,7 +458,17 @@ meshtastic_OnDemand OnDemandModule::prepareFwPlusVersion()
     onDemand.which_variant = meshtastic_OnDemand_response_tag;
     onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_FW_PLUS_VERSION;
     onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_fw_plus_version_tag;
-    onDemand.variant.response.response_data.fw_plus_version.version_number = 2;
+    onDemand.variant.response.response_data.fw_plus_version.version_number = FW_PLUS_VERSION;
+    return onDemand;
+}
+
+meshtastic_OnDemand OnDemandModule::prepareSnifferState()
+{
+    meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
+    onDemand.which_variant = meshtastic_OnDemand_response_tag;
+    onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_SNIFFER_STATE;
+    onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_sniffer_state_tag;
+    onDemand.variant.response.response_data.sniffer_state.enabled = snifferEnabled;
     return onDemand;
 }
 

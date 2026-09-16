@@ -85,6 +85,9 @@ NodeDB *nodeDB = nullptr;
 const uint32_t MAX_PORTS = 512;
 uint32_t portCounters[512] = {0};
 
+// RAM-only: intentionally never persisted, so it's always false again after a reboot.
+bool snifferEnabled = false;
+
 // we have plenty of ram so statically alloc this tempbuf (for now)
 EXT_RAM_BSS_ATTR meshtastic_DeviceState devicestate;
 meshtastic_MyNodeInfo &myNodeInfo = devicestate.my_node;
@@ -1515,9 +1518,6 @@ void NodeDB::installDefaultModuleConfig()
 
     moduleConfig.has_neighbor_info = true;
     moduleConfig.neighbor_info.enabled = false;
-
-    moduleConfig.has_nodemodadmin = true;
-    moduleConfig.nodemodadmin.sniffer_enabled = default_sniffer_enabled;
 
     installTrafficManagementDefaults(moduleConfig);
 

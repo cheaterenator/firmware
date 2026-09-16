@@ -521,12 +521,6 @@ typedef struct _meshtastic_ModuleConfig_TAKConfig {
     meshtastic_MemberRole role;
 } meshtastic_ModuleConfig_TAKConfig;
 
-/* Sniffer mode config (MT-SW) */
-typedef struct _meshtastic_ModuleConfig_NodeModAdminConfig {
-    /* sniffer enabled */
-    bool sniffer_enabled;
-} meshtastic_ModuleConfig_NodeModAdminConfig;
-
 /* A GPIO pin definition for remote hardware module */
 typedef struct _meshtastic_RemoteHardwarePin {
     /* GPIO Pin number (must match Arduino) */
@@ -586,8 +580,6 @@ typedef struct _meshtastic_ModuleConfig {
         meshtastic_ModuleConfig_TAKConfig tak;
         /* MeshBeacon module config */
         meshtastic_ModuleConfig_MeshBeaconConfig mesh_beacon;
-        /* Sniffer mode (MT-SW) */
-        meshtastic_ModuleConfig_NodeModAdminConfig nodemodadmin;
     } payload_variant;
 } meshtastic_ModuleConfig;
 
@@ -658,7 +650,6 @@ extern "C" {
 #define meshtastic_ModuleConfig_TAKConfig_team_ENUMTYPE meshtastic_Team
 #define meshtastic_ModuleConfig_TAKConfig_role_ENUMTYPE meshtastic_MemberRole
 
-
 #define meshtastic_RemoteHardwarePin_type_ENUMTYPE meshtastic_RemoteHardwarePinType
 
 
@@ -683,7 +674,6 @@ extern "C" {
 #define meshtastic_ModuleConfig_MeshBeaconConfig_init_default {0, "", false, meshtastic_ChannelSettings_init_default, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, 0, 0, {meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default}}
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_default {false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, 0}
 #define meshtastic_ModuleConfig_TAKConfig_init_default {_meshtastic_Team_MIN, _meshtastic_MemberRole_MIN}
-#define meshtastic_ModuleConfig_NodeModAdminConfig_init_default {0}
 #define meshtastic_RemoteHardwarePin_init_default {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 #define meshtastic_ModuleConfig_init_zero        {0, {meshtastic_ModuleConfig_MQTTConfig_init_zero}}
 #define meshtastic_ModuleConfig_MQTTConfig_init_zero {0, "", "", "", 0, 0, 0, "", 0, 0, false, meshtastic_ModuleConfig_MapReportSettings_init_zero}
@@ -705,7 +695,6 @@ extern "C" {
 #define meshtastic_ModuleConfig_MeshBeaconConfig_init_zero {0, "", false, meshtastic_ChannelSettings_init_zero, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, 0, 0, {meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero, meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero}}
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_init_zero {false, _meshtastic_Config_LoRaConfig_ModemPreset_MIN, _meshtastic_Config_LoRaConfig_RegionCode_MIN, false, 0}
 #define meshtastic_ModuleConfig_TAKConfig_init_zero {_meshtastic_Team_MIN, _meshtastic_MemberRole_MIN}
-#define meshtastic_ModuleConfig_NodeModAdminConfig_init_zero {0}
 #define meshtastic_RemoteHardwarePin_init_zero   {0, "", _meshtastic_RemoteHardwarePinType_MIN}
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -827,7 +816,6 @@ extern "C" {
 #define meshtastic_ModuleConfig_MeshBeaconConfig_broadcast_targets_tag 13
 #define meshtastic_ModuleConfig_TAKConfig_team_tag 1
 #define meshtastic_ModuleConfig_TAKConfig_role_tag 2
-#define meshtastic_ModuleConfig_NodeModAdminConfig_sniffer_enabled_tag 1
 #define meshtastic_RemoteHardwarePin_gpio_pin_tag 1
 #define meshtastic_RemoteHardwarePin_name_tag    2
 #define meshtastic_RemoteHardwarePin_type_tag    3
@@ -851,7 +839,6 @@ extern "C" {
 #define meshtastic_ModuleConfig_traffic_management_tag 15
 #define meshtastic_ModuleConfig_tak_tag          16
 #define meshtastic_ModuleConfig_mesh_beacon_tag  17
-#define meshtastic_ModuleConfig_nodemodadmin_tag 18
 
 /* Struct field encoding specification for nanopb */
 #define meshtastic_ModuleConfig_FIELDLIST(X, a) \
@@ -871,8 +858,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,paxcounter,payload_variant.p
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,statusmessage,payload_variant.statusmessage),  14) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,traffic_management,payload_variant.traffic_management),  15) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,tak,payload_variant.tak),  16) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,mesh_beacon,payload_variant.mesh_beacon),  17) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,nodemodadmin,payload_variant.nodemodadmin),  18)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,mesh_beacon,payload_variant.mesh_beacon),  17)
 #define meshtastic_ModuleConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_DEFAULT NULL
 #define meshtastic_ModuleConfig_payload_variant_mqtt_MSGTYPE meshtastic_ModuleConfig_MQTTConfig
@@ -892,7 +878,6 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload_variant,nodemodadmin,payload_variant
 #define meshtastic_ModuleConfig_payload_variant_traffic_management_MSGTYPE meshtastic_ModuleConfig_TrafficManagementConfig
 #define meshtastic_ModuleConfig_payload_variant_tak_MSGTYPE meshtastic_ModuleConfig_TAKConfig
 #define meshtastic_ModuleConfig_payload_variant_mesh_beacon_MSGTYPE meshtastic_ModuleConfig_MeshBeaconConfig
-#define meshtastic_ModuleConfig_payload_variant_nodemodadmin_MSGTYPE meshtastic_ModuleConfig_NodeModAdminConfig
 
 #define meshtastic_ModuleConfig_MQTTConfig_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enabled,           1) \
@@ -1095,11 +1080,6 @@ X(a, STATIC,   SINGULAR, UENUM,    role,              2)
 #define meshtastic_ModuleConfig_TAKConfig_CALLBACK NULL
 #define meshtastic_ModuleConfig_TAKConfig_DEFAULT NULL
 
-#define meshtastic_ModuleConfig_NodeModAdminConfig_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, BOOL,     sniffer_enabled,   1)
-#define meshtastic_ModuleConfig_NodeModAdminConfig_CALLBACK NULL
-#define meshtastic_ModuleConfig_NodeModAdminConfig_DEFAULT NULL
-
 #define meshtastic_RemoteHardwarePin_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   gpio_pin,          1) \
 X(a, STATIC,   SINGULAR, STRING,   name,              2) \
@@ -1127,7 +1107,6 @@ extern const pb_msgdesc_t meshtastic_ModuleConfig_StatusMessageConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_MeshBeaconConfig_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_msg;
 extern const pb_msgdesc_t meshtastic_ModuleConfig_TAKConfig_msg;
-extern const pb_msgdesc_t meshtastic_ModuleConfig_NodeModAdminConfig_msg;
 extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
@@ -1151,7 +1130,6 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_MeshBeaconConfig_fields &meshtastic_ModuleConfig_MeshBeaconConfig_msg
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_fields &meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_msg
 #define meshtastic_ModuleConfig_TAKConfig_fields &meshtastic_ModuleConfig_TAKConfig_msg
-#define meshtastic_ModuleConfig_NodeModAdminConfig_fields &meshtastic_ModuleConfig_NodeModAdminConfig_msg
 #define meshtastic_RemoteHardwarePin_fields &meshtastic_RemoteHardwarePin_msg
 
 /* Maximum encoded size of messages (where known) */
@@ -1166,7 +1144,6 @@ extern const pb_msgdesc_t meshtastic_RemoteHardwarePin_msg;
 #define meshtastic_ModuleConfig_MeshBeaconConfig_BroadcastTarget_size 10
 #define meshtastic_ModuleConfig_MeshBeaconConfig_size 242
 #define meshtastic_ModuleConfig_NeighborInfoConfig_size 10
-#define meshtastic_ModuleConfig_NodeModAdminConfig_size 2
 #define meshtastic_ModuleConfig_PaxcounterConfig_size 30
 #define meshtastic_ModuleConfig_RangeTestConfig_size 12
 #define meshtastic_ModuleConfig_RemoteHardwareConfig_size 96
