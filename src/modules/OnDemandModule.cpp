@@ -27,7 +27,7 @@ static const size_t MAX_PACKET_SIZE = 190;
 // the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 4 = adds
 // REQUEST_NODE_STATS_BROADCAST_CONFIG/_SET_ (periodic push of RESPONSE_NODE_STATS, see
 // applyNodeStatsBroadcastConfig()).
-#define FW_PLUS_VERSION 3
+#define FW_PLUS_VERSION 2
 
 static constexpr uint16_t TX_HISTORY_KEY_ONDEMAND_NODE_STATS = 0x8006;
 // A configured interval below this floor is clamped up - mirrors min_default_telemetry_interval_secs'
@@ -462,12 +462,16 @@ meshtastic_OnDemand OnDemandModule::preparePingResponse(const meshtastic_MeshPac
     // rather than whatever was on the stack. memset for the same cross-toolchain reason noted there
     // (moot for this particular struct - no array members - but kept consistent).
     memset(&onDemand.variant.response.response_data.ping, 0, sizeof(onDemand.variant.response.response_data.ping));
-	int8_t hops = getHopsAway(mp);
+    int8_t hops = getHopsAway(mp);
     if (mp.from != 0x0 && mp.from != nodeDB->getNodeNum() && mp.hop_limit == mp.hop_start) {
         onDemand.variant.response.response_data.ping.has_rx_rssi = true;
         onDemand.variant.response.response_data.ping.has_snr = true;
         onDemand.variant.response.response_data.ping.rx_rssi = mp.rx_rssi;
         onDemand.variant.response.response_data.ping.snr = mp.rx_snr;
+    }
+    if (hops >= 0) {
+        onDemand.variant.response.response_data.ping.has_hop_count = true;
+        onDemand.variant.response.response_data.ping.hop_count = hops;
     }
     return onDemand;
 }
