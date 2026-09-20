@@ -81,6 +81,9 @@ template <class T> class LR20x0Interface : public RadioLibInterface
     /** Board LF PA table after begin(); HF keeps RadioLib default. Warn-only on setOutputPower miss. */
     void applyCustomLfPaTable(float freq);
 
+    /** Semtech DCDC sensitivity workaround for sub-GHz operation; no-op unless LR2021_DCDC_WORKAROUND is set */
+    void applyDcdcWorkaround();
+
     /** setStandby()'s body, returning the standby error instead of asserting - for callers that can recover */
     int16_t trySetStandby();
 
