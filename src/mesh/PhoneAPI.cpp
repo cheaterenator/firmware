@@ -1173,6 +1173,9 @@ void PhoneAPI::sendConfigComplete()
     onConfigComplete();
 
     pauseBluetoothLogging = false;
+
+    // Re-arm polling for anything queued while live-packet notifications were suppressed during sync.
+    service->nudgeFromNum();
 }
 
 void PhoneAPI::releasePhonePacket()
