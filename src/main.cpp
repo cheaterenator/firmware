@@ -1471,6 +1471,43 @@ void scannerToSensorsMap(const std::unique_ptr<ScanI2CTwoWire> &i2cScanner, Scan
 #endif
 
 #ifndef PIO_UNIT_TESTING
+// Diagnostic (MT-SW): watches for the monotonic uptime carry jumping by roughly one 2^32ms wrap
+// (~49.7 days) between consecutive loop() iterations - the "double-counted wrap" failure mode
+// documented on Time::serviceMonotonic() in UptimeClock.cpp ("Two concurrent callers could count
+// one wrap twice"). Gated on snifferEnabled because the jump has only been observed with the
+// sniffer active and must stay silent with it off. Read-only: never touches the published clock,
+// only logs loudly enough to correlate against other logs the next time it happens.
+static void checkSnifferUptimeJumpDiagnostic()
+{
+    static uint32_t lastLoopMs = 0;
+    static uint32_t lastUptimeSecs = 0;
+    static bool haveBaseline = false;
+
+    if (!snifferEnabled) {
+        haveBaseline = false; // don't let a stale baseline span a sniffer-off gap
+        return;
+    }
+
+    const uint32_t nowLoopMs = Time::getMillis();
+    const uint32_t nowUptimeSecs = Time::getUptimeSecs();
+    if (haveBaseline) {
+        const uint32_t loopDeltaMs = nowLoopMs - lastLoopMs;             // wrap-safe (unsigned, <49.7 days apart)
+        const uint32_t uptimeDeltaSecs = nowUptimeSecs - lastUptimeSecs; // wrap-safe, same reasoning
+        // loop() iterations are milliseconds apart in practice; a few seconds of slack absorbs any
+        // legitimate stall (flash write, screen redraw) without masking a ~49.7-day (4294967s) jump.
+        const uint32_t plausibleSecs = (loopDeltaMs / 1000) + 30;
+        if (uptimeDeltaSecs > plausibleSecs) {
+            LOG_ERROR("Sniffer-diag: uptime jumped %us across one loop() iteration (loop gap only "
+                      "%ums, was=%us now=%us) - suspected monotonic-wrap double-count, see "
+                      "Time::serviceMonotonic() in UptimeClock.cpp",
+                      uptimeDeltaSecs, loopDeltaMs, lastUptimeSecs, nowUptimeSecs);
+        }
+    }
+    lastLoopMs = nowLoopMs;
+    lastUptimeSecs = nowUptimeSecs;
+    haveBaseline = true;
+}
+
 void loop()
 {
     startBusy();
@@ -1478,6 +1515,7 @@ void loop()
 
     // The single writer of the monotonic wrap carry; every other caller only reads it.
     Time::serviceMonotonic();
+    checkSnifferUptimeJumpDiagnostic();
 
 #if defined(MESHTASTIC_ENCRYPTED_STORAGE) && defined(MESHTASTIC_PHONEAPI_ACCESS_CONTROL)
     if (lockdownDisablePending) {

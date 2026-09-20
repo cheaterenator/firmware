@@ -82,6 +82,10 @@ static_assert(skipZero(UINT32_MAX) == UINT32_MAX, "skipZero must not wrap the la
 /// that preempts publication uses the previous snapshot. If publication completes during a copy,
 /// the reader retries; it never waits for a publish in progress.
 ///
+/// An elapsed reading past half of the 2^32 range is treated as `now` having ticked backward
+/// (clock-domain jitter, not a genuine near-full wrap) and held at the last published value rather
+/// than folded in - see test_monotonic_ignores_small_backward_tick_of_millis.
+///
 /// Not intended for ISR call sites because lock-free std::atomic operations are not guaranteed by
 /// every supported toolchain. ISRs use getMillis(); the publication protocol itself never waits.
 uint64_t getMillisMonotonic();
@@ -92,7 +96,10 @@ uint32_t getUptimeSecs();
 
 /// Advances the published wrap carry. THE ONLY WRITER - call it from the main loop and nowhere
 /// else. Two concurrent callers could count one wrap twice, jumping every uptime and wall-clock
-/// reading ~49.7 days forward for the rest of the boot.
+/// reading ~49.7 days forward for the rest of the boot - so a second call arriving while one is
+/// still in flight is refused (logged, not read) rather than risking a torn snapshot read. That is
+/// a backstop against the failure mode, not a license to call this from a second place: the refused
+/// call still means one fewer tick counted this cycle.
 ///
 /// Must run at least once per ~49.7-day wrap window; the main loop calls it every iteration.
 void serviceMonotonic();

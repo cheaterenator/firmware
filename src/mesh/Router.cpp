@@ -359,7 +359,10 @@ PacketId generatePacketId()
 RxTimeStamp computeRxTimeStamp()
 {
     const bool haveTime = getRTCQuality() >= RTCQualityFromNet;
-    return {haveTime ? getValidTime(RTCQualityFromNet) : Time::getUptimeSecs(), haveTime};
+    // skipZero(): a placeholder of exactly 0 (packet arrived in the first uptime-second of boot)
+    // would otherwise be indistinguishable from rx_time's zeroed-on-alloc default, which is what a
+    // packet that was never stamped at all carries - see reconcilePendingRxTimes()'s zero-guard.
+    return {haveTime ? getValidTime(RTCQualityFromNet) : Time::skipZero(Time::getUptimeSecs()), haveTime};
 }
 
 void stampRxTime(meshtastic_MeshPacket *p)
@@ -536,6 +539,10 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
     if (snifferEnabled && isFromUs(p) && !isBroadcast(p->to)) {
         meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*p);
         if (copyPtr) {
+            // A TX'd packet never had rx_time stamped (it's not a reception); without this the
+            // zeroed default reads as an unset placeholder and reconcilePendingRxTimes() misdates
+            // it to boot time once the clock becomes trustworthy.
+            stampRxTime(copyPtr);
             LOG_DEBUG("Sniffer: forwarding own TX portnum=%d to=0x%08x to phone",
                       p->which_payload_variant == meshtastic_MeshPacket_decoded_tag ? p->decoded.portnum : -1, p->to);
             service->sendPacketToPhoneRaw(copyPtr);

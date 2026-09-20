@@ -2,6 +2,7 @@
 #include "Channels.h"
 #include "MeshService.h"
 #include "NodeDB.h"
+#include "Router.h"
 #include "configuration.h"
 #include "modules/RoutingModule.h"
 #include <algorithm>
@@ -253,6 +254,9 @@ void MeshModule::sendResponse(const meshtastic_MeshPacket &req)
         if (snifferEnabled) {
             meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*r);
             if (copyPtr) {
+                // A freshly-allocated reply never had rx_time stamped; see the matching comment at
+                // the own-TX sniffer forward in Router::send().
+                stampRxTime(copyPtr);
                 LOG_DEBUG("Sniffer: forwarding module reply portnum=%d to=0x%08x to phone", r->decoded.portnum, r->to);
                 service->sendPacketToPhoneRaw(copyPtr);
             } else {

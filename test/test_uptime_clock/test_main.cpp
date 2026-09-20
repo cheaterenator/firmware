@@ -1,9 +1,10 @@
 // Unit tests for src/UptimeClock.{h,cpp} - the monotonic uptime seam.
 // Covers: test-clock injection, stepping the injected clock, the real-clock fallback, the
-// single-writer wrap carry (readers derive, serviceMonotonic() publishes), and the 0-sentinel dodge
-// helpers (skipZero/timerEndsAtMillis). getMillis() itself is a plain 32-bit read with no wrap
-// handling of its own beyond those helpers - deadline/throttle wrap arithmetic built on top of it
-// is tested in test_throttle/.
+// single-writer wrap carry (readers derive, serviceMonotonic() publishes), rejecting a backward-
+// looking tick instead of folding it in as a near-full wrap, rejecting a second concurrent writer
+// instead of risking a torn read, and the 0-sentinel dodge helpers (skipZero/timerEndsAtMillis).
+// getMillis() itself is a plain 32-bit read with no wrap handling of its own beyond those helpers -
+// deadline/throttle wrap arithmetic built on top of it is tested in test_throttle/.
 #include "Arduino.h"
 #include "TestUtil.h"
 #include "UptimeClock.h"
@@ -364,6 +365,38 @@ void test_monotonic_reader_completes_while_publish_is_paused()
     TEST_ASSERT_EQUAL_UINT64(101u, readerValue);
 }
 
+// --- concurrent writers ---
+
+// The failure mode UptimeClock.h documents: "Two concurrent callers could count one wrap twice." A
+// second serviceMonotonic() call arriving while the first is still mid-publish - on hardware this
+// would be a preempting BLE/ISR context, not another thread - must back off instead of reading the
+// snapshot the first is actively moving past, so only the first writer's wrap is ever counted.
+void test_monotonic_second_writer_is_rejected_while_a_publish_is_in_flight()
+{
+    Time::setTestMillis(0xFFFFFF00u); // near the wrap
+    Time::serviceMonotonic();
+
+    publishPaused.store(false, std::memory_order_relaxed);
+    releasePublish.store(false, std::memory_order_relaxed);
+    Time::setMonotonicPublishHookForTests(pauseMonotonicPublish);
+
+    Time::advanceTestMillis(0x200u); // crosses the wrap; low word is now 0x100
+    std::thread firstWriter([]() { Time::serviceMonotonic(); });
+    while (!publishPaused.load(std::memory_order_acquire))
+        std::this_thread::yield();
+
+    // Arrives after the first writer has computed and stored its wrap-counted snapshot into the
+    // inactive slot but before it has advanced publishedGeneration. Must be a complete no-op, not a
+    // second attempt to fold the same wrap in again.
+    Time::serviceMonotonic();
+
+    releasePublish.store(true, std::memory_order_release);
+    firstWriter.join();
+    Time::setMonotonicPublishHookForTests(nullptr);
+
+    TEST_ASSERT_EQUAL_UINT64(0x100000100ull, Time::getMillisMonotonic()); // exactly one wrap counted
+}
+
 // --- getTime(): the wall clock must not retreat at the millis() wrap ---
 
 // Epoch used by the wall-clock cases; must sit between BUILD_EPOCH (stamped at build time) and
@@ -478,6 +511,7 @@ void setup()
     RUN_TEST(test_getUptimeSecs_stays_exact_across_the_wrap);
     RUN_TEST(test_monotonic_exact_with_concurrent_readers);
     RUN_TEST(test_monotonic_reader_completes_while_publish_is_paused);
+    RUN_TEST(test_monotonic_second_writer_is_rejected_while_a_publish_is_in_flight);
     RUN_TEST(test_getTime_stays_exact_across_the_wrap);
     RUN_TEST(test_getTime_anchored_after_a_wrap_is_exact);
     RUN_TEST(test_getTime_unaffected_by_concurrent_readers_across_the_wrap);
