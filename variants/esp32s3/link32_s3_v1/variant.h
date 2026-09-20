@@ -1,5 +1,5 @@
 #define BATTERY_PIN 15
-#define ADC_CHANNEL ADC2_GPIO15_CHANNEL // ADC channel for battery voltage measurement
+#define ADC_CHANNEL ADC_CHANNEL_4 // GPIO15 = ADC2 channel 4
 #define BATTERY_SENSE_SAMPLES 30
 #define BAT_MEASURE_ADC_UNIT 2 // Use ADC2 for battery measurement
 

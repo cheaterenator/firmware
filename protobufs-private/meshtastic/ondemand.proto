@@ -114,6 +114,14 @@ message Ping {
     optional uint32 hop_count = 3;
 }
 
+// Switch + interval for this node's own unsolicited RESPONSE_NODE_STATS broadcasts (see
+// OnDemandType.REQUEST_NODE_STATS_BROADCAST_CONFIG / _SET_ below). Lets passive listeners that
+// cannot send an OnDemandRequest (e.g. MQTT/packet-capture scripts) still collect NodeStats.
+message NodeStatsBroadcastConfig {
+    bool enabled = 1;
+    uint32 interval_secs = 2;
+}
+
 enum OnDemandType {
     UNKNOWN_TYPE = 0;
     REQUEST_PACKET_RX_HISTORY = 1;
@@ -144,10 +152,18 @@ enum OnDemandType {
     REQUEST_SNIFFER_DISABLE = 24;
     REQUEST_SNIFFER_STATE = 25;
     RESPONSE_SNIFFER_STATE = 26;
+    // Get/set the periodic RESPONSE_NODE_STATS broadcast (see NodeStatsBroadcastConfig above).
+    // Unlike the sniffer requests, these are honored from any node in range, not just the local
+    // phone (mp.from == 0) - see OnDemandModule::handleReceivedProtobuf().
+    REQUEST_NODE_STATS_BROADCAST_CONFIG = 27;
+    RESPONSE_NODE_STATS_BROADCAST_CONFIG = 28;
+    REQUEST_SET_NODE_STATS_BROADCAST_CONFIG = 29;
 }
 
 message OnDemandRequest {
     OnDemandType request_type = 1;
+    // Only present (and only consulted) when request_type == REQUEST_SET_NODE_STATS_BROADCAST_CONFIG.
+    optional NodeStatsBroadcastConfig node_stats_broadcast_config = 2;
 }
 
 message SnifferState {
@@ -168,6 +184,7 @@ message OnDemandResponse {
         FwPlusVersion fw_plus_version = 10;
         RoutingErrorsHistory routing_errors = 11;
         SnifferState sniffer_state = 12;
+        NodeStatsBroadcastConfig node_stats_broadcast_config = 13;
     }
 }
 

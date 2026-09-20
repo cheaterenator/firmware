@@ -39,7 +39,13 @@ typedef enum _meshtastic_OnDemandType {
     meshtastic_OnDemandType_REQUEST_SNIFFER_ENABLE = 23,
     meshtastic_OnDemandType_REQUEST_SNIFFER_DISABLE = 24,
     meshtastic_OnDemandType_REQUEST_SNIFFER_STATE = 25,
-    meshtastic_OnDemandType_RESPONSE_SNIFFER_STATE = 26
+    meshtastic_OnDemandType_RESPONSE_SNIFFER_STATE = 26,
+    /* Get/set the periodic RESPONSE_NODE_STATS broadcast (see NodeStatsBroadcastConfig above).
+ Unlike the sniffer requests, these are honored from any node in range, not just the local
+ phone (mp.from == 0) - see OnDemandModule::handleReceivedProtobuf(). */
+    meshtastic_OnDemandType_REQUEST_NODE_STATS_BROADCAST_CONFIG = 27,
+    meshtastic_OnDemandType_RESPONSE_NODE_STATS_BROADCAST_CONFIG = 28,
+    meshtastic_OnDemandType_REQUEST_SET_NODE_STATS_BROADCAST_CONFIG = 29
 } meshtastic_OnDemandType;
 
 /* Struct definitions */
@@ -193,8 +199,19 @@ typedef struct _meshtastic_Ping {
     uint32_t hop_count;
 } meshtastic_Ping;
 
+/* Switch + interval for this node's own unsolicited RESPONSE_NODE_STATS broadcasts (see
+ OnDemandType.REQUEST_NODE_STATS_BROADCAST_CONFIG / _SET_ below). Lets passive listeners that
+ cannot send an OnDemandRequest (e.g. MQTT/packet-capture scripts) still collect NodeStats. */
+typedef struct _meshtastic_NodeStatsBroadcastConfig {
+    bool enabled;
+    uint32_t interval_secs;
+} meshtastic_NodeStatsBroadcastConfig;
+
 typedef struct _meshtastic_OnDemandRequest {
     meshtastic_OnDemandType request_type;
+    /* Only present (and only consulted) when request_type == REQUEST_SET_NODE_STATS_BROADCAST_CONFIG. */
+    bool has_node_stats_broadcast_config;
+    meshtastic_NodeStatsBroadcastConfig node_stats_broadcast_config;
 } meshtastic_OnDemandRequest;
 
 typedef struct _meshtastic_SnifferState {
@@ -216,6 +233,7 @@ typedef struct _meshtastic_OnDemandResponse {
         meshtastic_FwPlusVersion fw_plus_version;
         meshtastic_RoutingErrorsHistory routing_errors;
         meshtastic_SnifferState sniffer_state;
+        meshtastic_NodeStatsBroadcastConfig node_stats_broadcast_config;
     } response_data;
 } meshtastic_OnDemandResponse;
 
@@ -238,8 +256,9 @@ extern "C" {
 
 /* Helper constants for enums */
 #define _meshtastic_OnDemandType_MIN meshtastic_OnDemandType_UNKNOWN_TYPE
-#define _meshtastic_OnDemandType_MAX meshtastic_OnDemandType_RESPONSE_SNIFFER_STATE
-#define _meshtastic_OnDemandType_ARRAYSIZE ((meshtastic_OnDemandType)(meshtastic_OnDemandType_RESPONSE_SNIFFER_STATE+1))
+#define _meshtastic_OnDemandType_MAX meshtastic_OnDemandType_REQUEST_SET_NODE_STATS_BROADCAST_CONFIG
+#define _meshtastic_OnDemandType_ARRAYSIZE ((meshtastic_OnDemandType)(meshtastic_OnDemandType_REQUEST_SET_NODE_STATS_BROADCAST_CONFIG+1))
+
 
 
 
@@ -279,7 +298,8 @@ extern "C" {
 #define meshtastic_ExchangeList_init_default     {0, {meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default, meshtastic_ExchangeEntry_init_default}}
 #define meshtastic_NodesList_init_default        {0, {meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default, meshtastic_NodeEntry_init_default}}
 #define meshtastic_Ping_init_default             {false, 0, false, 0, false, 0}
-#define meshtastic_OnDemandRequest_init_default  {_meshtastic_OnDemandType_MIN}
+#define meshtastic_NodeStatsBroadcastConfig_init_default {0, 0}
+#define meshtastic_OnDemandRequest_init_default  {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_default}
 #define meshtastic_SnifferState_init_default     {0}
 #define meshtastic_OnDemandResponse_init_default {_meshtastic_OnDemandType_MIN, 0, {meshtastic_RxPacketHistory_init_default}}
 #define meshtastic_OnDemand_init_default         {false, 0, false, 0, 0, {meshtastic_OnDemandRequest_init_default}}
@@ -298,7 +318,8 @@ extern "C" {
 #define meshtastic_ExchangeList_init_zero        {0, {meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero, meshtastic_ExchangeEntry_init_zero}}
 #define meshtastic_NodesList_init_zero           {0, {meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero, meshtastic_NodeEntry_init_zero}}
 #define meshtastic_Ping_init_zero                {false, 0, false, 0, false, 0}
-#define meshtastic_OnDemandRequest_init_zero     {_meshtastic_OnDemandType_MIN}
+#define meshtastic_NodeStatsBroadcastConfig_init_zero {0, 0}
+#define meshtastic_OnDemandRequest_init_zero     {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_zero}
 #define meshtastic_SnifferState_init_zero        {0}
 #define meshtastic_OnDemandResponse_init_zero    {_meshtastic_OnDemandType_MIN, 0, {meshtastic_RxPacketHistory_init_zero}}
 #define meshtastic_OnDemand_init_zero            {false, 0, false, 0, 0, {meshtastic_OnDemandRequest_init_zero}}
@@ -365,7 +386,10 @@ extern "C" {
 #define meshtastic_Ping_rx_rssi_tag              1
 #define meshtastic_Ping_snr_tag                  2
 #define meshtastic_Ping_hop_count_tag            3
+#define meshtastic_NodeStatsBroadcastConfig_enabled_tag 1
+#define meshtastic_NodeStatsBroadcastConfig_interval_secs_tag 2
 #define meshtastic_OnDemandRequest_request_type_tag 1
+#define meshtastic_OnDemandRequest_node_stats_broadcast_config_tag 2
 #define meshtastic_SnifferState_enabled_tag      1
 #define meshtastic_OnDemandResponse_response_type_tag 1
 #define meshtastic_OnDemandResponse_rx_packet_history_tag 2
@@ -379,6 +403,7 @@ extern "C" {
 #define meshtastic_OnDemandResponse_fw_plus_version_tag 10
 #define meshtastic_OnDemandResponse_routing_errors_tag 11
 #define meshtastic_OnDemandResponse_sniffer_state_tag 12
+#define meshtastic_OnDemandResponse_node_stats_broadcast_config_tag 13
 #define meshtastic_OnDemand_packet_index_tag     1
 #define meshtastic_OnDemand_packet_total_tag     2
 #define meshtastic_OnDemand_request_tag          3
@@ -511,10 +536,18 @@ X(a, STATIC,   OPTIONAL, UINT32,   hop_count,         3)
 #define meshtastic_Ping_CALLBACK NULL
 #define meshtastic_Ping_DEFAULT NULL
 
+#define meshtastic_NodeStatsBroadcastConfig_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     enabled,           1) \
+X(a, STATIC,   SINGULAR, UINT32,   interval_secs,     2)
+#define meshtastic_NodeStatsBroadcastConfig_CALLBACK NULL
+#define meshtastic_NodeStatsBroadcastConfig_DEFAULT NULL
+
 #define meshtastic_OnDemandRequest_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UENUM,    request_type,      1)
+X(a, STATIC,   SINGULAR, UENUM,    request_type,      1) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  node_stats_broadcast_config,   2)
 #define meshtastic_OnDemandRequest_CALLBACK NULL
 #define meshtastic_OnDemandRequest_DEFAULT NULL
+#define meshtastic_OnDemandRequest_node_stats_broadcast_config_MSGTYPE meshtastic_NodeStatsBroadcastConfig
 
 #define meshtastic_SnifferState_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enabled,           1)
@@ -533,7 +566,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,air_activity_history,response_
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,node_stats,response_data.node_stats),   9) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,fw_plus_version,response_data.fw_plus_version),  10) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,routing_errors,response_data.routing_errors),  11) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,sniffer_state,response_data.sniffer_state),  12)
+X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,sniffer_state,response_data.sniffer_state),  12) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,node_stats_broadcast_config,response_data.node_stats_broadcast_config),  13)
 #define meshtastic_OnDemandResponse_CALLBACK NULL
 #define meshtastic_OnDemandResponse_DEFAULT NULL
 #define meshtastic_OnDemandResponse_response_data_rx_packet_history_MSGTYPE meshtastic_RxPacketHistory
@@ -547,6 +581,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,sniffer_state,response_data.sn
 #define meshtastic_OnDemandResponse_response_data_fw_plus_version_MSGTYPE meshtastic_FwPlusVersion
 #define meshtastic_OnDemandResponse_response_data_routing_errors_MSGTYPE meshtastic_RoutingErrorsHistory
 #define meshtastic_OnDemandResponse_response_data_sniffer_state_MSGTYPE meshtastic_SnifferState
+#define meshtastic_OnDemandResponse_response_data_node_stats_broadcast_config_MSGTYPE meshtastic_NodeStatsBroadcastConfig
 
 #define meshtastic_OnDemand_FIELDLIST(X, a) \
 X(a, STATIC,   OPTIONAL, UINT32,   packet_index,      1) \
@@ -573,6 +608,7 @@ extern const pb_msgdesc_t meshtastic_ExchangeEntry_msg;
 extern const pb_msgdesc_t meshtastic_ExchangeList_msg;
 extern const pb_msgdesc_t meshtastic_NodesList_msg;
 extern const pb_msgdesc_t meshtastic_Ping_msg;
+extern const pb_msgdesc_t meshtastic_NodeStatsBroadcastConfig_msg;
 extern const pb_msgdesc_t meshtastic_OnDemandRequest_msg;
 extern const pb_msgdesc_t meshtastic_SnifferState_msg;
 extern const pb_msgdesc_t meshtastic_OnDemandResponse_msg;
@@ -594,6 +630,7 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_ExchangeList_fields &meshtastic_ExchangeList_msg
 #define meshtastic_NodesList_fields &meshtastic_NodesList_msg
 #define meshtastic_Ping_fields &meshtastic_Ping_msg
+#define meshtastic_NodeStatsBroadcastConfig_fields &meshtastic_NodeStatsBroadcastConfig_msg
 #define meshtastic_OnDemandRequest_fields &meshtastic_OnDemandRequest_msg
 #define meshtastic_SnifferState_fields &meshtastic_SnifferState_msg
 #define meshtastic_OnDemandResponse_fields &meshtastic_OnDemandResponse_msg
@@ -607,9 +644,10 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_ExchangeList_size             240
 #define meshtastic_FwPlusVersion_size            6
 #define meshtastic_NodeEntry_size                69
+#define meshtastic_NodeStatsBroadcastConfig_size 8
 #define meshtastic_NodeStats_size                227
 #define meshtastic_NodesList_size                710
-#define meshtastic_OnDemandRequest_size          2
+#define meshtastic_OnDemandRequest_size          12
 #define meshtastic_OnDemandResponse_size         715
 #define meshtastic_OnDemand_size                 724
 #define meshtastic_Ping_size                     22

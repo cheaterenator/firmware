@@ -37,6 +37,9 @@
 #define min_node_info_broadcast_secs 60 * 60 // No regular broadcasts of more than once an hour
 #define min_neighbor_info_broadcast_secs 4 * 60 * 60
 #define default_map_publish_interval_secs 60 * 60
+// OnDemandModule's periodic RESPONSE_NODE_STATS broadcast (MT-SW private protocol) - independent
+// switch/interval from moduleConfig.telemetry, defaults to the same cadence as that broadcast.
+#define default_ondemand_node_stats_broadcast_interval_secs default_telemetry_broadcast_interval_secs
 
 enum class TrafficType { POSITION, TELEMETRY };
 

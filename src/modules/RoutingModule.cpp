@@ -103,6 +103,9 @@ void RoutingModule::sendAckNak(meshtastic_Routing_Error err, NodeNum to, PacketI
     if (snifferEnabled) {
         meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*p);
         if (copyPtr) {
+            // An ACK/NAK we're generating never had rx_time stamped; see the matching comment at the
+            // own-TX sniffer forward in Router::send().
+            stampRxTime(copyPtr);
             service->sendPacketToPhoneRaw(copyPtr);
         } else {
             LOG_WARN("Sniffer: packetPool exhausted, could not copy ACK/NAK for sniffing");

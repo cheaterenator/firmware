@@ -209,7 +209,10 @@ void MeshService::reconcilePendingRxTimes()
         meshtastic_MeshPacket *p = toPhoneQueue.dequeuePtr(0);
         if (!p) // drained from under us - nothing left to rotate
             break;
-        if (!p->has_rx_time) {
+        // rx_time == 0 here cannot be a genuine placeholder - computeRxTimeStamp() skipZero()s it -
+        // so it is a packet that was never stamped at all (e.g. a locally-generated packet the
+        // sniffer forwarded as-is). Reconciling it would misdate it to this device's boot time.
+        if (!p->has_rx_time && p->rx_time != 0) {
             // Both stamps are monotonic uptime seconds, so the elapsed term is exact at any age.
             // If it somehow exceeds the epoch, leave the packet un-dated rather than pre-1970.
             const uint32_t elapsedSecs = nowUptimeSecs - p->rx_time;

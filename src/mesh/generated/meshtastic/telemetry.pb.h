@@ -502,6 +502,20 @@ typedef struct _meshtastic_LocalStats {
     int32_t noise_floor;
 } meshtastic_LocalStats;
 
+
+/* Extended local device statistics (custom firmware) */
+typedef struct _meshtastic_LocalStatsExtended {
+    uint32_t memory_free_cheap;
+    uint32_t memory_total;
+    uint32_t cpu_usage_percent;
+    uint32_t flash_used_bytes;
+    uint32_t flash_total_bytes;
+    uint32_t memory_psram_free;
+    uint32_t memory_psram_total;
+} meshtastic_LocalStatsExtended;
+
+
+
 /* Traffic management statistics for mesh network optimization */
 typedef struct _meshtastic_TrafficManagementStats {
     /* Total number of packets inspected by traffic management */
@@ -581,6 +595,8 @@ typedef struct _meshtastic_Telemetry {
         meshtastic_HostMetrics host_metrics;
         /* Traffic management statistics */
         meshtastic_TrafficManagementStats traffic_management_stats;
+		/* Health telemetry metrics */
+        meshtastic_LocalStatsExtended local_stats_extended;
         /* Soil and water probe metrics */
         meshtastic_SoilWaterMetrics soil_water_metrics;
     } variant;
@@ -671,6 +687,7 @@ extern "C" {
 #define meshtastic_PowerMetrics_init_default     {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_AirQualityMetrics_init_default {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_LocalStats_init_default       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define meshtastic_LocalStatsExtended_init_default {0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_TrafficManagementStats_init_default {0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_HealthMetrics_init_default    {false, 0, false, 0, false, 0}
 #define meshtastic_HostMetrics_init_default      {0, 0, 0, false, 0, false, 0, 0, 0, 0, false, ""}
@@ -685,6 +702,7 @@ extern "C" {
 #define meshtastic_PowerMetrics_init_zero        {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_AirQualityMetrics_init_zero   {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_LocalStats_init_zero          {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define meshtastic_LocalStatsExtended_init_zero  {0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_TrafficManagementStats_init_zero {0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_HealthMetrics_init_zero       {false, 0, false, 0, false, 0}
 #define meshtastic_HostMetrics_init_zero         {0, 0, 0, false, 0, false, 0, 0, 0, 0, false, ""}
@@ -812,6 +830,13 @@ extern "C" {
 #define meshtastic_LocalStats_heap_free_bytes_tag 13
 #define meshtastic_LocalStats_num_tx_dropped_tag 14
 #define meshtastic_LocalStats_noise_floor_tag    15
+#define meshtastic_LocalStatsExtended_memory_free_cheap_tag 1
+#define meshtastic_LocalStatsExtended_memory_total_tag 2
+#define meshtastic_LocalStatsExtended_cpu_usage_percent_tag 3
+#define meshtastic_LocalStatsExtended_flash_used_bytes_tag 4
+#define meshtastic_LocalStatsExtended_flash_total_bytes_tag 5
+#define meshtastic_LocalStatsExtended_memory_psram_free_tag 6
+#define meshtastic_LocalStatsExtended_memory_psram_total_tag 7
 #define meshtastic_TrafficManagementStats_packets_inspected_tag 1
 #define meshtastic_TrafficManagementStats_position_dedup_drops_tag 2
 #define meshtastic_TrafficManagementStats_nodeinfo_cache_hits_tag 3
@@ -841,6 +866,7 @@ extern "C" {
 #define meshtastic_Telemetry_host_metrics_tag    8
 #define meshtastic_Telemetry_traffic_management_stats_tag 9
 #define meshtastic_Telemetry_soil_water_metrics_tag 11
+#define meshtastic_Telemetry_local_stats_extended_tag 20
 #define meshtastic_Nau7802Config_zeroOffset_tag  1
 #define meshtastic_Nau7802Config_calibrationFactor_tag 2
 #define meshtastic_AS3935Config_tuning_cap_pf_tag 1
@@ -999,6 +1025,17 @@ X(a, STATIC,   SINGULAR, INT32,    noise_floor,      15)
 #define meshtastic_LocalStats_CALLBACK NULL
 #define meshtastic_LocalStats_DEFAULT NULL
 
+#define meshtastic_LocalStatsExtended_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_free_cheap,   1) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_total,      2) \
+X(a, STATIC,   SINGULAR, UINT32,   cpu_usage_percent,   3) \
+X(a, STATIC,   SINGULAR, UINT32,   flash_used_bytes,   4) \
+X(a, STATIC,   SINGULAR, UINT32,   flash_total_bytes,   5) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_psram_free,   6) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_psram_total,   7)
+#define meshtastic_LocalStatsExtended_CALLBACK NULL
+#define meshtastic_LocalStatsExtended_DEFAULT NULL
+
 #define meshtastic_TrafficManagementStats_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   packets_inspected,   1) \
 X(a, STATIC,   SINGULAR, UINT32,   position_dedup_drops,   2) \
@@ -1040,7 +1077,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (variant,local_stats,variant.local_stats),   
 X(a, STATIC,   ONEOF,    MESSAGE,  (variant,health_metrics,variant.health_metrics),   7) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (variant,host_metrics,variant.host_metrics),   8) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (variant,traffic_management_stats,variant.traffic_management_stats),   9) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (variant,soil_water_metrics,variant.soil_water_metrics),  11)
+X(a, STATIC,   ONEOF,    MESSAGE,  (variant,soil_water_metrics,variant.soil_water_metrics),  11)  \
+X(a, STATIC,   ONEOF,    MESSAGE,  (variant,local_stats_extended,variant.local_stats_extended),  20)
 #define meshtastic_Telemetry_CALLBACK NULL
 #define meshtastic_Telemetry_DEFAULT NULL
 #define meshtastic_Telemetry_variant_device_metrics_MSGTYPE meshtastic_DeviceMetrics
@@ -1052,6 +1090,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (variant,soil_water_metrics,variant.soil_wate
 #define meshtastic_Telemetry_variant_host_metrics_MSGTYPE meshtastic_HostMetrics
 #define meshtastic_Telemetry_variant_traffic_management_stats_MSGTYPE meshtastic_TrafficManagementStats
 #define meshtastic_Telemetry_variant_soil_water_metrics_MSGTYPE meshtastic_SoilWaterMetrics
+#define meshtastic_Telemetry_variant_local_stats_extended_MSGTYPE meshtastic_LocalStatsExtended
 
 #define meshtastic_Nau7802Config_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, INT32,    zeroOffset,        1) \
@@ -1090,6 +1129,7 @@ extern const pb_msgdesc_t meshtastic_SoilWaterMetrics_msg;
 extern const pb_msgdesc_t meshtastic_PowerMetrics_msg;
 extern const pb_msgdesc_t meshtastic_AirQualityMetrics_msg;
 extern const pb_msgdesc_t meshtastic_LocalStats_msg;
+extern const pb_msgdesc_t meshtastic_LocalStatsExtended_msg;
 extern const pb_msgdesc_t meshtastic_TrafficManagementStats_msg;
 extern const pb_msgdesc_t meshtastic_HealthMetrics_msg;
 extern const pb_msgdesc_t meshtastic_HostMetrics_msg;
@@ -1106,6 +1146,7 @@ extern const pb_msgdesc_t meshtastic_SEN6XState_msg;
 #define meshtastic_PowerMetrics_fields &meshtastic_PowerMetrics_msg
 #define meshtastic_AirQualityMetrics_fields &meshtastic_AirQualityMetrics_msg
 #define meshtastic_LocalStats_fields &meshtastic_LocalStats_msg
+#define meshtastic_LocalStatsExtended_fields &meshtastic_LocalStatsExtended_msg
 #define meshtastic_TrafficManagementStats_fields &meshtastic_TrafficManagementStats_msg
 #define meshtastic_HealthMetrics_fields &meshtastic_HealthMetrics_msg
 #define meshtastic_HostMetrics_fields &meshtastic_HostMetrics_msg
@@ -1124,6 +1165,7 @@ extern const pb_msgdesc_t meshtastic_SEN6XState_msg;
 #define meshtastic_HealthMetrics_size            11
 #define meshtastic_HostMetrics_size              225
 #define meshtastic_LocalStats_size               87
+#define meshtastic_LocalStatsExtended_size       42
 #define meshtastic_Nau7802Config_size            16
 #define meshtastic_PowerMetrics_size             81
 #define meshtastic_SEN5XState_size               27

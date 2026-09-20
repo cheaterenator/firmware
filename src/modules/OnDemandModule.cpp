@@ -1,12 +1,15 @@
 #include "OnDemandModule.h"
 #include "Default.h"
 #include "airtime.h"
+#include "FSCommon.h"
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "PowerStatus.h"
 #include "RadioLibInterface.h"
 #include "Router.h"
 #include "SPILock.h"
+#include "Throttle.h"
+#include "TransmitHistory.h"
 #include "UptimeClock.h"
 #include "configuration.h"
 #include "gps/RTC.h"
@@ -14,9 +17,6 @@
 #include "memGet.h"
 #include <cstring>
 #include <pb_encode.h>
-#if defined(ARCH_ESP32)
-#include "FSCommon.h"
-#endif
 
 OnDemandModule *onDemandModule;
 
@@ -24,9 +24,22 @@ static const size_t MAX_PACKET_SIZE = 190;
 #define NUM_ONLINE_SECS (60 * 60 * 2)
 #define ONDEMAND_MAGIC_USB_BATTERY_LEVEL 101
 // Capability signal for the companion app: bump whenever a query/command is added to this protocol so
-// the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 3 = adds
-// REQUEST_SNIFFER_ENABLE/DISABLE/STATE.
+// the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 4 = adds
+// REQUEST_NODE_STATS_BROADCAST_CONFIG/_SET_ (periodic push of RESPONSE_NODE_STATS, see
+// applyNodeStatsBroadcastConfig()).
 #define FW_PLUS_VERSION 3
+
+static constexpr uint16_t TX_HISTORY_KEY_ONDEMAND_NODE_STATS = 0x8006;
+// A configured interval below this floor is clamped up - mirrors min_default_telemetry_interval_secs'
+// role for moduleConfig.telemetry, applied here since this broadcast isn't part of that message.
+static constexpr uint32_t MIN_NODE_STATS_BROADCAST_INTERVAL_SECS = min_default_telemetry_interval_secs;
+
+OnDemandModule::OnDemandModule() : ProtobufModule("OnDemand", meshtastic_PortNum_FWPLUS_APP, &meshtastic_OnDemand_msg),
+                                    concurrency::OSThread("OnDemand")
+{
+    nodeStatsBroadcastIntervalSecs = default_ondemand_node_stats_broadcast_interval_secs;
+    loadNodeStatsBroadcastConfig();
+}
 
 bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_OnDemand *t)
 {
@@ -87,6 +100,20 @@ bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
         break;
     case meshtastic_OnDemandType_REQUEST_SNIFFER_STATE:
         sendPacketToRequester(prepareSnifferState(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_NODE_STATS_BROADCAST_CONFIG:
+        sendPacketToRequester(prepareNodeStatsBroadcastConfig(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_SET_NODE_STATS_BROADCAST_CONFIG:
+        // Unlike REQUEST_SNIFFER_ENABLE/DISABLE, honored from any node in range (this only toggles
+        // an unsolicited stats broadcast, not a phone-traffic tap).
+        if (t->variant.request.has_node_stats_broadcast_config) {
+            applyNodeStatsBroadcastConfig(t->variant.request.node_stats_broadcast_config);
+        } else {
+            LOG_WARN("OnDemand: REQUEST_SET_NODE_STATS_BROADCAST_CONFIG from=0x%08x had no config payload, ignoring",
+                      mp.from);
+        }
+        sendPacketToRequester(prepareNodeStatsBroadcastConfig(), mp);
         break;
     default: {
         meshtastic_OnDemand unknown = meshtastic_OnDemand_init_zero;
@@ -470,6 +497,133 @@ meshtastic_OnDemand OnDemandModule::prepareSnifferState()
     onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_sniffer_state_tag;
     onDemand.variant.response.response_data.sniffer_state.enabled = snifferEnabled;
     return onDemand;
+}
+
+meshtastic_OnDemand OnDemandModule::prepareNodeStatsBroadcastConfig()
+{
+    meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
+    onDemand.which_variant = meshtastic_OnDemand_response_tag;
+    onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_NODE_STATS_BROADCAST_CONFIG;
+    onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_node_stats_broadcast_config_tag;
+    onDemand.variant.response.response_data.node_stats_broadcast_config.enabled = nodeStatsBroadcastEnabled;
+    onDemand.variant.response.response_data.node_stats_broadcast_config.interval_secs = nodeStatsBroadcastIntervalSecs;
+    return onDemand;
+}
+
+void OnDemandModule::applyNodeStatsBroadcastConfig(const meshtastic_NodeStatsBroadcastConfig &cfg)
+{
+    nodeStatsBroadcastEnabled = cfg.enabled;
+    nodeStatsBroadcastIntervalSecs = Default::getConfiguredOrMinimumValue(
+        Default::getConfiguredOrDefault(cfg.interval_secs, default_ondemand_node_stats_broadcast_interval_secs),
+        MIN_NODE_STATS_BROADCAST_INTERVAL_SECS);
+    LOG_INFO("OnDemand: NodeStats broadcast config set to enabled=%d interval_secs=%u", nodeStatsBroadcastEnabled,
+             nodeStatsBroadcastIntervalSecs);
+    saveNodeStatsBroadcastConfig();
+}
+
+void OnDemandModule::broadcastNodeStats()
+{
+    meshtastic_MeshPacket *p = allocDataProtobuf(prepareNodeStats());
+    if (!p) {
+        LOG_WARN("OnDemand: packetPool exhausted, dropping periodic NodeStats broadcast");
+        return;
+    }
+    p->to = NODENUM_BROADCAST;
+    p->decoded.want_response = false;
+    p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
+    LOG_INFO("OnDemand: broadcasting NodeStats to mesh (interval_secs=%u)", nodeStatsBroadcastIntervalSecs);
+    service->sendToMesh(p, RX_SRC_LOCAL, true);
+}
+
+#ifdef FSCom
+namespace
+{
+// Own on-disk format, not a pb_encode of NodeStatsBroadcastConfig - two scalars don't need a
+// protobuf round-trip; a magic+version header plus a packed struct suffices (see TransmitHistory).
+constexpr const char *NODE_STATS_BROADCAST_CONFIG_FILENAME = "/prefs/ondemand_stats_bcast.dat";
+constexpr uint32_t NODE_STATS_BROADCAST_CONFIG_MAGIC = 0x4E534243; // "NSBC"
+constexpr uint8_t NODE_STATS_BROADCAST_CONFIG_VERSION = 1;
+
+struct __attribute__((packed)) NodeStatsBroadcastConfigFile {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t enabled;
+    uint32_t intervalSecs;
+};
+} // namespace
+
+void OnDemandModule::loadNodeStatsBroadcastConfig()
+{
+    spiLock->lock();
+    auto file = FSCom.open(NODE_STATS_BROADCAST_CONFIG_FILENAME, FILE_O_READ);
+    if (file) {
+        NodeStatsBroadcastConfigFile stored{};
+        bool ok = file.read((uint8_t *)&stored, sizeof(stored)) == sizeof(stored);
+        if (ok && stored.magic == NODE_STATS_BROADCAST_CONFIG_MAGIC && stored.version == NODE_STATS_BROADCAST_CONFIG_VERSION) {
+            nodeStatsBroadcastEnabled = stored.enabled;
+            nodeStatsBroadcastIntervalSecs = Default::getConfiguredOrMinimumValue(
+                Default::getConfiguredOrDefault(stored.intervalSecs, default_ondemand_node_stats_broadcast_interval_secs),
+                MIN_NODE_STATS_BROADCAST_INTERVAL_SECS);
+            LOG_INFO("OnDemand: loaded NodeStats broadcast config from disk: enabled=%d interval_secs=%u",
+                     nodeStatsBroadcastEnabled, nodeStatsBroadcastIntervalSecs);
+        } else {
+            LOG_WARN("OnDemand: invalid NodeStats broadcast config file, using defaults");
+        }
+        file.close();
+    } else {
+        LOG_INFO("OnDemand: no NodeStats broadcast config file found, using defaults (enabled=%d interval_secs=%u)",
+                 nodeStatsBroadcastEnabled, nodeStatsBroadcastIntervalSecs);
+    }
+    spiLock->unlock();
+}
+
+void OnDemandModule::saveNodeStatsBroadcastConfig()
+{
+    spiLock->lock();
+    FSCom.mkdir("/prefs");
+    if (FSCom.exists(NODE_STATS_BROADCAST_CONFIG_FILENAME)) {
+        FSCom.remove(NODE_STATS_BROADCAST_CONFIG_FILENAME);
+    }
+    auto file = FSCom.open(NODE_STATS_BROADCAST_CONFIG_FILENAME, FILE_O_WRITE);
+    if (file) {
+        NodeStatsBroadcastConfigFile stored{};
+        stored.magic = NODE_STATS_BROADCAST_CONFIG_MAGIC;
+        stored.version = NODE_STATS_BROADCAST_CONFIG_VERSION;
+        stored.enabled = nodeStatsBroadcastEnabled;
+        stored.intervalSecs = nodeStatsBroadcastIntervalSecs;
+        file.write((uint8_t *)&stored, sizeof(stored));
+        file.flush();
+        file.close();
+        LOG_DEBUG("OnDemand: saved NodeStats broadcast config to disk");
+    } else {
+        LOG_WARN("OnDemand: failed to open NodeStats broadcast config file for writing");
+    }
+    spiLock->unlock();
+}
+#else
+// No filesystem available on this arch - config stays in-memory only for the boot session.
+void OnDemandModule::loadNodeStatsBroadcastConfig() {}
+void OnDemandModule::saveNodeStatsBroadcastConfig() {}
+#endif
+
+int32_t OnDemandModule::runOnce()
+{
+    // Idle poll cadence while disabled/waiting - cheap, and fine-grained enough for any interval
+    // this broadcast is configured to (floored at MIN_NODE_STATS_BROADCAST_INTERVAL_SECS minutes).
+    static constexpr int32_t POLL_MS = 60 * 1000;
+
+    if (!nodeStatsBroadcastEnabled || config.device.role == meshtastic_Config_DeviceConfig_Role_CLIENT_HIDDEN) {
+        return POLL_MS;
+    }
+
+    uint32_t lastSent = transmitHistory ? transmitHistory->getLastSentToMeshMillis(TX_HISTORY_KEY_ONDEMAND_NODE_STATS) : 0;
+    if ((lastSent == 0 || Throttle::hasElapsed(lastSent, nodeStatsBroadcastIntervalSecs * 1000UL)) &&
+        airTime->isTxAllowedChannelUtil(true) && airTime->isTxAllowedAirUtil()) {
+        broadcastNodeStats();
+        if (transmitHistory)
+            transmitHistory->setLastSentToMesh(TX_HISTORY_KEY_ONDEMAND_NODE_STATS);
+    }
+    return POLL_MS;
 }
 
 void OnDemandModule::sendPacketToRequester(const meshtastic_OnDemand &demand_packet, const meshtastic_MeshPacket &mp,
