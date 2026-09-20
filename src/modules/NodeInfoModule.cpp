@@ -131,7 +131,7 @@ void NodeInfoModule::sendOurNodeInfo(NodeNum dest, bool wantReplies, uint8_t cha
         // consumes a pending channel change. sendToMesh() has already released the packet.
         if (res != ERRNO_OK && res != ERRNO_SHOULD_RELEASE) {
             LOG_WARN("NodeInfo send rejected (err=%d)", res);
-            return false;
+            return;
         }
         if (transmitHistory)
             transmitHistory->setLastSentToMesh(meshtastic_PortNum_NODEINFO_APP);
@@ -139,7 +139,6 @@ void NodeInfoModule::sendOurNodeInfo(NodeNum dest, bool wantReplies, uint8_t cha
         // rather than from the last tick - an ad-hoc send otherwise leaves the periodic copy right behind it.
         setIntervalFromNow(
             Default::getConfiguredOrDefaultMs(config.device.node_info_broadcast_secs, default_node_info_broadcast_secs));
-        return true;
     }
 }
 
