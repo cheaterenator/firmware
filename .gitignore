@@ -76,3 +76,4 @@ build/wasm-obj/
 build/wasm-*.log
 .emsdk/
 userPrefs.jsonc
+userPrefs.jsonc
