@@ -1176,7 +1176,15 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
     config.security.serial_enabled = true;
     config.security.admin_channel_enabled = false;
     resetRadioConfig(true); // This also triggers NodeInfo/Position requests since we're fresh
-    strncpy(config.network.ntp_server, "meshtastic.pool.ntp.org", 32);
+#ifdef USERPREFS_NETWORK_NTP_SERVER
+    strncpy(config.network.ntp_server, USERPREFS_NETWORK_NTP_SERVER, sizeof(config.network.ntp_server) - 1);
+#else
+    strncpy(config.network.ntp_server, "meshtastic.pool.ntp.org", sizeof(config.network.ntp_server) - 1);
+#endif
+
+#ifdef USERPREFS_NETWORK_RSYSLOG_SERVER
+    strncpy(config.network.rsyslog_server, USERPREFS_NETWORK_RSYSLOG_SERVER, sizeof(config.network.rsyslog_server) - 1);
+#endif
 
 #if (defined(T_DECK) || defined(T_WATCH_S3) || defined(UNPHONE) || defined(PICOMPUTER_S3) || defined(SENSECAP_INDICATOR) ||      \
      defined(ELECROW_PANEL) || defined(HELTEC_V4_TFT) || defined(HELTEC_V4_R8_TFT) || defined(RAK_WISMESH_TAP_V2) ||             \
