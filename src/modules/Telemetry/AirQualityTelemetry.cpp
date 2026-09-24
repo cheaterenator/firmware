@@ -534,7 +534,7 @@ bool AirQualityTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
             lastMeasurementPacket = packetPool.allocCopy(*p);
             if (phoneOnly) {
                 LOG_INFO("Sending packet to phone");
-                service->sendToPhone(p);
+                service->sendLocalOnlyToPhone(p);
             } else {
                 LOG_INFO("Sending packet to mesh");
                 service->sendToMesh(p, RX_SRC_LOCAL, true);

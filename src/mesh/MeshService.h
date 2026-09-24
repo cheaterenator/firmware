@@ -201,6 +201,11 @@ class MeshService
     /// Send a packet to the phone
     void sendToPhone(meshtastic_MeshPacket *p);
 
+    /// Our own periodic phone-only refresh (position/telemetry that is not going out on the mesh).
+    /// Sniffer mode (MT-SW): dropped while snifferEnabled, so the sniffer only shows traffic that
+    /// touches the air - our mesh sends still reach the phone through sendToMesh()'s ccToPhone copy.
+    void sendLocalOnlyToPhone(meshtastic_MeshPacket *p);
+
     /// Sniffer mode (MT-SW): send a packet the node is not the intended recipient of (or a copy of a
     /// locally-generated reply) to the phone without attempting to decrypt/reinterpret it further.
     /// Uses the same toPhoneQueue as sendToPhone so it can never grow the queue's memory footprint,

@@ -77,3 +77,6 @@ build/wasm-*.log
 .emsdk/
 userPrefs.jsonc
 userPrefs.jsonc
+src/modules/OnDemandModule.cpp1111
+userPrefs.jsonc
+userPrefs.jsonc
