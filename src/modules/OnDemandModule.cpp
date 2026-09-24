@@ -169,7 +169,10 @@ void OnDemandModule::sendSegmentedNodeList(const meshtastic_MeshPacket &mp)
 
             while (idx < totalNodes) {
                 meshtastic_NodeInfoLite *node = nodeDB->getMeshNodeByIndex(idx);
-                if (!node || sinceLastSeen(node) >= NUM_ONLINE_SECS || node->num == ourNodeNum) {
+                // Skip nodes with an unknown hop count (e.g. only ever heard relayed through a channel we
+                // can't decode) - see the matching skip below for why: reporting them as hops=0 would show
+                // them as direct neighbors, with the SNR of whichever hop we last actually heard.
+                if (!node || sinceLastSeen(node) >= NUM_ONLINE_SECS || node->num == ourNodeNum || !node->has_hops_away) {
                     idx++;
                     continue;
                 }
@@ -217,7 +220,10 @@ void OnDemandModule::sendSegmentedNodeList(const meshtastic_MeshPacket &mp)
 
         while (currentIndex < totalNodes) {
             meshtastic_NodeInfoLite *node = nodeDB->getMeshNodeByIndex(currentIndex);
-            if (!node || sinceLastSeen(node) >= NUM_ONLINE_SECS || node->num == ourNodeNum) {
+            // Keep in sync with the probe pass above: a node with an unknown hop count is omitted
+            // rather than reported as hops=0, which would misrepresent a multi-hop node as a direct
+            // neighbor (and pair it with the SNR of whichever relay we actually heard).
+            if (!node || sinceLastSeen(node) >= NUM_ONLINE_SECS || node->num == ourNodeNum || !node->has_hops_away) {
                 currentIndex++;
                 continue;
             }
@@ -225,8 +231,8 @@ void OnDemandModule::sendSegmentedNodeList(const meshtastic_MeshPacket &mp)
             meshtastic_NodeEntry entry = meshtastic_NodeEntry_init_zero;
             entry.node_id = node->num;
             entry.last_heard = sinceLastSeen(node);
-            entry.hops = node->has_hops_away ? node->hops_away : 0;
-            entry.snr = (!node->has_hops_away || node->hops_away == 0) ? node->snr : 0;
+            entry.hops = node->hops_away;
+            entry.snr = node->hops_away == 0 ? node->snr : 0;
             // NodeInfoLite has no nested `user` (fields are flattened directly onto it).
             strncpy(entry.long_name, node->long_name, sizeof(entry.long_name) - 1);
             strncpy(entry.short_name, node->short_name, sizeof(entry.short_name) - 1);

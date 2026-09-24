@@ -222,7 +222,7 @@ void DeviceTelemetryModule::sendLocalStatsToPhone()
     p->decoded.want_response = false;
     p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
 
-    service->sendToPhone(p);
+    service->sendLocalOnlyToPhone(p);
 }
 
 void DeviceTelemetryModule::sendLocalStatsToMesh()
@@ -270,7 +270,7 @@ bool DeviceTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
     nodeDB->updateTelemetry(nodeDB->getNodeNum(), telemetry, RX_SRC_LOCAL);
     if (phoneOnly) {
         LOG_INFO("Send packet to phone");
-        service->sendToPhone(p);
+        service->sendLocalOnlyToPhone(p);
     } else {
         LOG_INFO("Send packet to mesh");
         service->sendToMesh(p, RX_SRC_LOCAL, true);

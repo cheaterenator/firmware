@@ -854,7 +854,7 @@ bool EnvironmentTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
                 p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
             if (phoneOnly) {
                 LOG_INFO("Send packet to phone");
-                service->sendToPhone(p);
+                service->sendLocalOnlyToPhone(p);
             } else {
                 LOG_INFO("Send packet to mesh");
                 service->sendToMesh(p, RX_SRC_LOCAL, true);

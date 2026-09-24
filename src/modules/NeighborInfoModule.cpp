@@ -207,6 +207,14 @@ void NeighborInfoModule::updateNeighbors(const meshtastic_MeshPacket &mp, const 
     // count as an edge. So we assume that if it's zero, then this packet is from
     // our node.
     if (mp.which_payload_variant == meshtastic_MeshPacket_decoded_tag && mp.from) {
+        // last_sent_by_id is only rewritten by relays that could decode the packet (a relay without this
+        // channel forwards it opaquely), so it can still name a node further away. relay_node in the clear
+        // header always identifies whoever actually transmitted what we heard.
+        if (np->last_sent_by_id && mp.relay_node != NO_RELAY_NODE &&
+            nodeDB->getLastByteOfNodeNum(np->last_sent_by_id) != mp.relay_node) {
+            LOG_DEBUG("Ignore stale last_sent_by_id 0x%08x, heard via relay 0x%x", np->last_sent_by_id, mp.relay_node);
+            return;
+        }
         getOrCreateNeighbor(mp.from, np->last_sent_by_id, np->node_broadcast_interval_secs, mp.rx_snr);
     }
 }

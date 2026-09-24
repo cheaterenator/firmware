@@ -431,7 +431,7 @@ bool PositionModule::sendOurPositionToPhone()
     p->to = NODENUM_BROADCAST;
     p->decoded.want_response = false;
     p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
-    service->sendToPhone(p);
+    service->sendLocalOnlyToPhone(p);
     return true;
 }
 
