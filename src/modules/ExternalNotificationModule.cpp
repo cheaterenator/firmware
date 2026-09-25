@@ -63,6 +63,55 @@ bool ascending = true;
 
 #define ASCII_BELL 0x07
 
+// Optional local-time window outside which the module stays silent, e.g. in a variant's build_flags:
+//   -D EXT_NOTIFY_ACTIVE_HOURS=\"8:00-22:00\"
+// A window whose end is earlier than its start wraps past midnight ("22:00-6:00").
+#ifdef EXT_NOTIFY_ACTIVE_HOURS
+namespace
+{
+struct ActiveHours {
+    int16_t start; // minutes after local midnight, -1 when the macro is malformed
+    int16_t end;
+};
+
+// Parses "H:MM" or "HH:MM" at s[i] and advances i past it; -1 when malformed.
+constexpr int parseClock(const char *s, int &i)
+{
+    int hours = 0;
+    int digits = 0;
+    while (digits < 2 && s[i] >= '0' && s[i] <= '9') {
+        hours = hours * 10 + (s[i++] - '0');
+        digits++;
+    }
+    if (digits == 0 || hours > 23 || s[i] != ':')
+        return -1;
+    i++;
+    if (!(s[i] >= '0' && s[i] <= '5' && s[i + 1] >= '0' && s[i + 1] <= '9'))
+        return -1;
+    const int minutes = (s[i] - '0') * 10 + (s[i + 1] - '0');
+    i += 2;
+    return hours * 60 + minutes;
+}
+
+constexpr ActiveHours parseActiveHours(const char *s)
+{
+    int i = 0;
+    const int start = parseClock(s, i);
+    if (start < 0 || s[i++] != '-')
+        return {-1, -1};
+    const int end = parseClock(s, i);
+    if (end < 0 || s[i] != '\0')
+        return {-1, -1};
+    return {int16_t(start), int16_t(end)};
+}
+
+constexpr ActiveHours activeHours = parseActiveHours(EXT_NOTIFY_ACTIVE_HOURS);
+static_assert(activeHours.start >= 0, "EXT_NOTIFY_ACTIVE_HOURS must look like \"8:00-22:00\"");
+static_assert(activeHours.start < 0 || activeHours.start != activeHours.end,
+              "EXT_NOTIFY_ACTIVE_HOURS start and end must differ");
+} // namespace
+#endif
+
 #if !MESHTASTIC_EXCLUDE_RTTTL
 meshtastic_RTTTLConfig rtttlConfig;
 static const char *rtttlConfigFile = "/prefs/ringtone.proto";
@@ -91,7 +140,8 @@ int32_t ExternalNotificationModule::runOnce()
         // isNagging is the armed flag; nagCycleCutoff is only a deadline while it is set, so
         // short-circuit before the comparison. `millis() + durationMs` can land on any value.
         const bool nagWindowExpired = !isNagging || Throttle::deadlinePassed(nagCycleCutoff);
-        if (nagWindowExpired && !isRtttlPlaying) {
+        // A nag cycle that is still running when the active-hours window closes ends there.
+        if ((nagWindowExpired && !isRtttlPlaying) || (isNagging && !withinActiveHours())) {
             // Turn off external notification immediately when timeout is reached, regardless of song state
             ExternalNotificationModule::stopNow();
             isNagging = false;
@@ -198,6 +248,25 @@ bool ExternalNotificationModule::canBuzz()
         return true;
     }
     return false;
+}
+
+/**
+ * False only while EXT_NOTIFY_ACTIVE_HOURS is set, local time is known, and it lies outside that window.
+ * Without a valid clock (fresh boot, nothing has set the time yet) alerts go through rather than being lost.
+ */
+bool ExternalNotificationModule::withinActiveHours()
+{
+#ifdef EXT_NOTIFY_ACTIVE_HOURS
+    const uint32_t localNow = getValidTime(RTCQualityDevice, true);
+    if (!localNow)
+        return true;
+    const int minuteOfDay = (localNow % 86400) / 60;
+    if (activeHours.start < activeHours.end)
+        return minuteOfDay >= activeHours.start && minuteOfDay < activeHours.end;
+    return minuteOfDay >= activeHours.start || minuteOfDay < activeHours.end;
+#else
+    return true;
+#endif
 }
 
 bool ExternalNotificationModule::wantPacket(const meshtastic_MeshPacket *p)
@@ -409,7 +478,7 @@ ExternalNotificationModule::ExternalNotificationModule()
 ProcessMessage ExternalNotificationModule::handleReceived(const meshtastic_MeshPacket &mp)
 {
     // Trigger external notification if enabled and not muted; isSilenced is from temporary mute toggles
-    if (moduleConfig.external_notification.enabled && !isSilenced) {
+    if (moduleConfig.external_notification.enabled && !isSilenced && withinActiveHours()) {
         if (!isFromUs(&mp)) {
             // Check if the message contains a bell character. Don't do this loop for every pin, just once.
             auto &p = mp.decoded;
@@ -475,7 +544,7 @@ ProcessMessage ExternalNotificationModule::handleReceived(const meshtastic_MeshP
             setIntervalFromNow(0); // run once so we know if we should do something
         }
     } else {
-        LOG_INFO("External Notification Module Disabled or muted");
+        LOG_INFO("External Notification Module Disabled, muted or outside active hours");
     }
 
     return ProcessMessage::CONTINUE; // Let others look at this message also if they want
@@ -524,7 +593,7 @@ void ExternalNotificationModule::armNagCycle()
 
 void ExternalNotificationModule::startNotification()
 {
-    if (!moduleConfig.external_notification.enabled || isSilenced)
+    if (!moduleConfig.external_notification.enabled || isSilenced || !withinActiveHours())
         return;
 
     // Waypoint and geofence events are neither direct messages nor bells.
