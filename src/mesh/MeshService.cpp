@@ -540,17 +540,6 @@ void MeshService::sendToPhone(meshtastic_MeshPacket *p)
     fromNum++;
 }
 
-void MeshService::sendLocalOnlyToPhone(meshtastic_MeshPacket *p)
-{
-    if (snifferEnabled) {
-        LOG_DEBUG("Sniffer: skip phone-only refresh portnum=%d",
-                  p->which_payload_variant == meshtastic_MeshPacket_decoded_tag ? p->decoded.portnum : -1);
-        releaseToPool(p);
-        return;
-    }
-    sendToPhone(p);
-}
-
 // Sniffer mode (MT-SW): deliver a packet the phone would not otherwise see (not addressed to us, or a
 // copy of a locally-generated module reply) without attempting to decode/reinterpret it further -
 // callers are responsible for handing us a packet already safe to expose as-is. Shares toPhoneQueue

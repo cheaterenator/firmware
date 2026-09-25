@@ -77,6 +77,9 @@ class ExternalNotificationModule : public SinglePortModule, private concurrency:
     bool canBuzz();
     bool nagging();
 
+    // Whether the local time falls inside the build-time EXT_NOTIFY_ACTIVE_HOURS window (always true when unset).
+    bool withinActiveHours();
+
     void stopNow();
 
     // Fire the configured message outputs for a non-message event such as a geofence crossing.

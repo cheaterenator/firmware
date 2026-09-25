@@ -270,7 +270,7 @@ bool HealthTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
             lastMeasurementPacket = packetPool.allocCopy(*p);
             if (phoneOnly) {
                 LOG_INFO("Send packet to phone");
-                service->sendLocalOnlyToPhone(p);
+                service->sendToPhone(p);
             } else {
                 LOG_INFO("Send packet to mesh");
                 service->sendToMesh(p, RX_SRC_LOCAL, true);
