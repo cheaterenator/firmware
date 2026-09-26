@@ -141,8 +141,10 @@ if [[ -f "$FILENAME" && "$FILENAME" == *.factory.bin ]]; then
     # Determine OTA filename based on MCU type (unified OTA format)
     OTAFILE="mt-${MCU}-ota.bin"
 
-    # Set SPIFFS filename with "littlefs-" prefix.
-    SPIFFSFILE="littlefs-${PROGNAME/firmware-/}.bin"
+    # Set SPIFFS filename by swapping the "firmware-" marker in the file name for "littlefs-"
+    # (any OUTPUT_NAME_PREFIX stamped before it and any leading directory are preserved).
+    PROGBASE="${PROGNAME##*/}"
+    SPIFFSFILE="${PROGNAME%"$PROGBASE"}${PROGBASE/firmware-/littlefs-}.bin"
 
     if [[ ! -f "$FILENAME" ]]; then
         echo "Error: file ${FILENAME} wasn't found. Terminating."
