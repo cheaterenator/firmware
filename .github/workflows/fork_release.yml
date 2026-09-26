@@ -10,8 +10,9 @@ name: Fork Release
 #      with it.
 #   2. It contains no step that reaches outside this repository - no Docker Hub,
 #      no Launchpad PPA / openSUSE OBS / Fedora COPR, no meshtastic.github.io. It
-#      only calls the existing build_firmware.yml reusable workflow (unmodified)
-#      and then attaches the result to a Release on ${{ github.repository }}.
+#      only calls the fork_build_firmware.yml reusable workflow (a copy of
+#      build_firmware.yml that understands the MT_SW_ output prefix) and then
+#      attaches the result to a Release on ${{ github.repository }}.
 # The `if: github.repository_owner != 'meshtastic'` guard on every job means this
 # workflow is a no-op even if this file were ever accidentally merged upstream.
 #
@@ -107,9 +108,10 @@ jobs:
       fail-fast: false
       matrix:
         build: ${{ fromJson(needs.setup.outputs.all) }}
-    # Reused as-is: this is the same reusable workflow main_matrix.yml uses,
-    # unmodified. It only builds and uploads a workflow artifact.
-    uses: ./.github/workflows/build_firmware.yml
+    # Fork copy of build_firmware.yml (the one main_matrix.yml uses), with
+    # manifest globs that match MT_SW_-prefixed outputs. It only builds and
+    # uploads a workflow artifact.
+    uses: ./.github/workflows/fork_build_firmware.yml
     with:
       version: ${{ needs.version.outputs.long }}
       pio_env: ${{ matrix.build.board }}
