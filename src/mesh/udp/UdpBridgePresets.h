@@ -11,10 +11,11 @@
 // which also requires the board to build with HAS_UDP_MULTICAST=1 (most ESP32 variants already do,
 // see esp32-common.ini) and, at runtime, config.network.enabled_protocols to have UDP_BROADCAST set.
 //
-// List every preset that should be allowed to bridge below. Only the default/preset-named channel is
-// affected - a custom-named channel's hash never depends on the local modem preset, so it already
-// bridges transparently over UDP without any of this. Region does not matter here either: only the
-// preset's display name and the public default PSK feed the channel hash.
+// List every preset that should be allowed to bridge below; custom modem settings are opted in
+// separately with UDP_BRIDGE_CUSTOM. Only the default/preset-named channel is affected - a
+// custom-named channel's hash never depends on the local modem preset, so it already bridges
+// transparently over UDP without any of this. Region does not matter here either: only the preset's
+// display name and the public default PSK feed the channel hash.
 #if defined(UDP_PRESET_BRIDGE) && UDP_PRESET_BRIDGE && !HAS_UDP_MULTICAST
 #error "UDP_PRESET_BRIDGE=1 requires a board built with HAS_UDP_MULTICAST=1 (see esp32-common.ini)"
 #endif
@@ -30,5 +31,12 @@
 
 static const meshtastic_Config_LoRaConfig_ModemPreset udpBridgePresets[] = UDP_BRIDGE_PRESET_LIST;
 static const size_t udpBridgePresetsCount = sizeof(udpBridgePresets) / sizeof(udpBridgePresets[0]);
+
+#ifndef UDP_BRIDGE_CUSTOM
+// Also bridge the default channel of nodes running custom modem settings (use_preset off), which is
+// named "Custom" rather than after a preset - e.g. while a mesh migrates from custom settings to a
+// preset. Matches only an unnamed primary channel on the default PSK. Enable with -D UDP_BRIDGE_CUSTOM=1.
+#define UDP_BRIDGE_CUSTOM 0
+#endif
 
 #endif // HAS_UDP_MULTICAST && UDP_PRESET_BRIDGE
