@@ -99,8 +99,8 @@ void RoutingModule::sendAckNak(meshtastic_Routing_Error err, NodeNum to, PacketI
 
     // Sniffer mode (MT-SW): mirror the ACK/NAK we're about to send - sendLocal() below only reaches
     // the phone when `to` is us, so for anything addressed elsewhere this is the only copy the phone
-    // would otherwise get.
-    if (snifferEnabled) {
+    // would otherwise get. One addressed to us already reaches it that way; a copy would duplicate it.
+    if (snifferEnabled && !isToUs(p)) {
         meshtastic_MeshPacket *copyPtr = packetPool.allocCopy(*p);
         if (copyPtr) {
             // An ACK/NAK we're generating never had rx_time stamped; see the matching comment at the
