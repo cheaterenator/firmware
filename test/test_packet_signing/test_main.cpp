@@ -192,12 +192,16 @@ class AuthPipelineRouter : public ReliableRouter
 class AuthPipelineRoutingModule : public RoutingModule
 {
   public:
-    void sendAckNak(meshtastic_Routing_Error, NodeNum, PacketId, ChannelIndex, uint8_t = 0, bool = false,
+    void sendAckNak(meshtastic_Routing_Error err, NodeNum to, PacketId, ChannelIndex, uint8_t = 0, bool = false,
                     const meshtastic_MeshPacket * = nullptr) override
     {
         ackCalls++;
+        lastError = err;
+        lastTo = to;
     }
     uint32_t ackCalls = 0;
+    meshtastic_Routing_Error lastError = meshtastic_Routing_Error_NONE;
+    NodeNum lastTo = 0;
 };
 
 class AuthPipelineModule : public SinglePortModule
@@ -426,6 +430,7 @@ void setUp(void)
     while (meshtastic_QueueStatus *queued = pipelineService->getQueueStatusForPhone())
         pipelineService->releaseQueueStatusToPool(queued);
     resetRoutingAuthEvaluationCount();
+    resetUnknownKeyNakThrottle();
 }
 
 // Set while C14's saturated AirTime is installed; see useDutyCycleSaturatedAirTime() below.
@@ -1731,6 +1736,39 @@ void test_C17_colliding_channel_hash_foreign_broadcast_is_relay_only(void)
     TEST_ASSERT_EQUAL(static_cast<int>(RoutingAuthVerdict::REJECT), static_cast<int>(passesRoutingAuthGate(&spoofed)));
 }
 
+// C18: a PKI packet to us from a sender whose key we lack fails decryption and is rejected at the auth
+// gate, so ReliableRouter never sees it. It must still earn a PKI_UNKNOWN_PUBKEY NAK, want_ack or not:
+// that NAK is what makes the sender send us its NodeInfo, and with it the key. Once per sender per window.
+void test_C18_pki_from_sender_with_unknown_key_is_nakked_once(void)
+{
+    uint8_t localPub[32], localPriv[32];
+    crypto->generateKeyPair(localPub, localPriv);
+    mockNodeDB->addNode(LOCAL_NODE);
+    mockNodeDB->setPublicKey(LOCAL_NODE, localPub);
+    // REMOTE_NODE deliberately absent: we have never learned its key.
+
+    meshtastic_MeshPacket p = meshtastic_MeshPacket_init_zero;
+    p.from = REMOTE_NODE;
+    p.to = LOCAL_NODE;
+    p.id = 0xC1800018;
+    p.channel = 0; // PKI
+    p.hop_limit = 3;
+    p.hop_start = 3;
+    p.want_ack = false; // the reply that exposed this carried none
+    p.which_payload_variant = meshtastic_MeshPacket_encrypted_tag;
+    p.encrypted.size = 40;
+    memset(p.encrypted.bytes, 0x5C, p.encrypted.size);
+
+    runPipelineIngress(p);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pipelineRouting->ackCalls, "a keyless sender's PKI packet must be NAKed");
+    TEST_ASSERT_EQUAL(meshtastic_Routing_Error_PKI_UNKNOWN_PUBKEY, pipelineRouting->lastError);
+    TEST_ASSERT_EQUAL_HEX32(REMOTE_NODE, pipelineRouting->lastTo);
+
+    p.id++;
+    runPipelineIngress(p);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pipelineRouting->ackCalls, "a repeat inside the window must not be NAKed again");
+}
+
 // C5: the packet survives (C4) but the identity claim inside it must not land - the pubkey guard
 // can't tell a signer from an impersonator replaying its (public) key. Only the write is refused.
 void test_N5_unsigned_unicast_nodeinfo_from_signer_does_not_change_name(void)
@@ -2485,6 +2523,7 @@ void setup()
     RUN_TEST(test_C15_reliable_unicast_tracks_five_total_attempts);
     RUN_TEST(test_C16_reliable_broadcast_keeps_three_total_attempts);
     RUN_TEST(test_C17_colliding_channel_hash_foreign_broadcast_is_relay_only);
+    RUN_TEST(test_C18_pki_from_sender_with_unknown_key_is_nakked_once);
     printf("\n=== Group N: NodeInfoModule authentication ===\n");
     RUN_TEST(test_N1_unsigned_nodeinfo_from_signer_dropped);
     RUN_TEST(test_N2_signed_nodeinfo_from_signer_not_dropped);

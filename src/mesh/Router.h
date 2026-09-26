@@ -278,6 +278,8 @@ uint32_t routingAuthEvaluationCount();
 void resetRoutingAuthEvaluationCount();
 /** Refill the admin-key fallback budget and re-stamp it against the clock in use right now. */
 void resetAdminKeyFallbackBudget();
+/** Forget which senders were sent a PKI_UNKNOWN_PUBKEY NAK from the auth-gate reject path. */
+void resetUnknownKeyNakThrottle();
 #endif
 
 /** Return 0 for success or a Routing_Error code for failure

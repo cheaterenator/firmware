@@ -29,8 +29,8 @@
 #include "mqtt/MQTT.h"
 #endif
 #include "Default.h"
-#if ARCH_PORTDUINO
 #include "Throttle.h"
+#if ARCH_PORTDUINO
 #include "platform/portduino/PortduinoGlue.h"
 #include "serialization/MeshPacketSerializer.h"
 #endif
@@ -1771,6 +1771,83 @@ void Router::dispatchReceived(meshtastic_MeshPacket *p, RxSource src)
     packetPool.release(p_encrypted); // Release the encrypted packet (release() handles nullptr)
 }
 
+#if !(MESHTASTIC_EXCLUDE_PKI)
+// Floors for the PKI_UNKNOWN_PUBKEY NAK sent from the auth-gate reject path, see nakPkiFromUnknownSender().
+static constexpr uint32_t kUnknownKeyNakPerSenderMs = 5 * 60 * 1000;
+static constexpr uint32_t kUnknownKeyNakGlobalMs = 10 * 1000;
+static constexpr size_t kUnknownKeyNakTrackedSenders = 8;
+
+struct UnknownKeyNakEntry {
+    NodeNum sender;
+    uint32_t lastMs;
+};
+static UnknownKeyNakEntry unknownKeyNakSent[kUnknownKeyNakTrackedSenders];
+static uint32_t lastUnknownKeyNakMs = 0;
+
+#ifdef PIO_UNIT_TESTING
+void resetUnknownKeyNakThrottle()
+{
+    memset(unknownKeyNakSent, 0, sizeof(unknownKeyNakSent));
+    lastUnknownKeyNakMs = 0;
+}
+#endif
+
+/**
+ * A PKI packet addressed to us from a sender whose key we lack cannot be decrypted, and
+ * passesRoutingAuthGate() rejects it before ReliableRouter::sniffReceived() - the only place that
+ * answered it with PKI_UNKNOWN_PUBKEY, and only for want_ack packets. That NAK is how we learn the
+ * key in-band: the sender answers it with its NodeInfo on the 60 s interactive gate. Without it, a
+ * peer that knows our key while we lack its key sends us PKI traffic nobody can read - replies to
+ * our own requests included - until its next routine NodeInfo broadcast, hours away.
+ *
+ * So NAK from here, for want_ack and plain packets alike. p->from is unauthenticated, so the NAKs
+ * are rate-limited per sender and globally: a stream of forged senders must not become a stream of
+ * transmissions.
+ */
+static void nakPkiFromUnknownSender(const meshtastic_MeshPacket *p)
+{
+    if (!routingModule || !isToUs(p) || isFromUs(p) || p->via_mqtt || owner.is_licensed ||
+        p->which_payload_variant != meshtastic_MeshPacket_encrypted_tag || p->channel != 0)
+        return;
+
+    if (lastUnknownKeyNakMs && Throttle::isWithinTimespanMs(lastUnknownKeyNakMs, kUnknownKeyNakGlobalMs))
+        return;
+    UnknownKeyNakEntry *slot = nullptr;
+    for (auto &entry : unknownKeyNakSent) {
+        if (entry.sender == p->from) {
+            if (Throttle::isWithinTimespanMs(entry.lastMs, kUnknownKeyNakPerSenderMs))
+                return;
+            slot = &entry;
+            break;
+        }
+    }
+    const uint32_t now = Time::getMillis();
+    if (!slot) {
+        // Unseen sender: take a free entry, otherwise the one NAKed longest ago.
+        slot = &unknownKeyNakSent[0];
+        for (auto &entry : unknownKeyNakSent) {
+            if (entry.sender == 0) {
+                slot = &entry;
+                break;
+            }
+            if ((uint32_t)(now - entry.lastMs) > (uint32_t)(now - slot->lastMs))
+                slot = &entry;
+        }
+    }
+
+    // A key we do hold that failed is a mismatch or corruption: the sender's NodeInfo would not replace it.
+    meshtastic_NodeInfoLite_public_key_t key = {0, {0}};
+    if (nodeDB->copyPublicKeyForDecrypt(p->from, key))
+        return;
+
+    LOG_INFO("PKI packet from 0x%08x, whose key we lack; send PKI_UNKNOWN_PUBKEY", p->from);
+    routingModule->sendAckNak(meshtastic_Routing_Error_PKI_UNKNOWN_PUBKEY, getFrom(p), p->id, channels.getPrimaryIndex(),
+                              routingModule->getHopLimitForResponse(*p));
+    *slot = {p->from, Time::skipZero(now)};
+    lastUnknownKeyNakMs = Time::skipZero(now);
+}
+#endif
+
 void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
 {
 #if ARCH_PORTDUINO
@@ -1823,6 +1900,9 @@ void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
     // an unknown channel passes as opaque traffic and retains the existing relay behavior.
     const auto authVerdict = passesRoutingAuthGate(p);
     if (authVerdict == RoutingAuthVerdict::REJECT) {
+#if !(MESHTASTIC_EXCLUDE_PKI)
+        nakPkiFromUnknownSender(p);
+#endif
         packetPool.release(p);
         return;
     }

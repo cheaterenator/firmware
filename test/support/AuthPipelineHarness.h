@@ -655,6 +655,7 @@ static void pipelineHarnessSetUp()
     crypto->setDHPrivateKey(noKey);
     crypto->clearPendingPublicKey();
     resetAdminKeyFallbackBudget(); // a suite that drains the bucket must not starve the next one
+    resetUnknownKeyNakThrottle();
 #endif
 }
 
