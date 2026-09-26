@@ -3,6 +3,10 @@
 #include "configuration.h"
 #include "mesh/Throttle.h"
 
+#ifdef ARCH_RP2040
+#include <hardware/sync.h> // arduino-pico does not pull in CMSIS, so there is no __disable_irq()
+#endif
+
 // ---------------------------------------------------------------------------
 // Controlled firmware hang, used to prove that the hardware watchdog really
 // resets the MCU (and to measure how long that takes).
@@ -80,7 +84,9 @@ inline void watchdogTestHang(uint8_t mode)
     }
 
     if (mode == WATCHDOG_TEST_MODE_NOIRQ) {
-#if defined(__arm__) && !defined(ARCH_PORTDUINO)
+#if defined(ARCH_RP2040)
+        (void)save_and_disable_interrupts(); // RP2040/RP2350 (pico-sdk); masks this core like __disable_irq()
+#elif defined(__arm__) && !defined(ARCH_PORTDUINO)
         __disable_irq(); // from here on nothing in software runs, not even the RTOS tick
 #else
         LOG_WARN("WatchdogTest: NOIRQ mode unsupported on this arch, spinning with interrupts on");
