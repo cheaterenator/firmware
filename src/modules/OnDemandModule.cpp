@@ -50,6 +50,10 @@ bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
 
     LOG_INFO("OnDemand: rx request_type=%d from=0x%08x channel=%d", (int)t->variant.request.request_type, mp.from, mp.channel);
 
+    // Every request type below answers via sendPacketToRequester(), outside the want_response path
+    // (allocReply() is NULL), so without this callModules() would also NAK it with NO_RESPONSE.
+    ignoreRequest = true;
+
     switch (t->variant.request.request_type) {
     case meshtastic_OnDemandType_REQUEST_NODE_STATS:
         sendPacketToRequester(prepareNodeStats(), mp);
