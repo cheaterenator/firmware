@@ -405,6 +405,8 @@ void setUp(void)
     // COMPATIBLE so existing meshes remain interoperable; tests that cover that
     // mode opt in explicitly.
     setPolicy(meshtastic_Config_SecurityConfig_PacketSignaturePolicy_PACKET_SIGNATURE_POLICY_BALANCED);
+    // E14-E19 pin the envelope coverage of the v1 layout; the build signs legacy by default.
+    crypto->setXeddsaSignLegacy(false);
     myNodeInfo.my_node_num = LOCAL_NODE; // drives isFromUs()/getFrom()/isToUs()
 
     // Working primary channel with the default PSK so encrypt/decrypt round-trips.
