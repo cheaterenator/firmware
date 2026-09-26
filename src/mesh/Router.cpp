@@ -1138,8 +1138,9 @@ DecodeState perhapsDecode(meshtastic_MeshPacket *p)
     // UDP preset bridge: an inbound UDP-multicast packet whose hash matched none of this node's own
     // channels gets one more try against the configured bridge preset list (see
     // mesh/udp/UdpBridgePresets.h). Off by default; setBridgePresetCryptoForHash() only ever succeeds
-    // when UDP_PRESET_BRIDGE is enabled for this build. Scoped to the default/preset-named channel - a
-    // custom-named channel's hash never depends on the local modem preset, so it already matched above.
+    // when UDP_PRESET_BRIDGE is enabled for this build. Scoped to the default/preset-named channel (or
+    // "Custom" with UDP_BRIDGE_CUSTOM) - a custom-named channel's hash never depends on the local modem
+    // preset, so it already matched above.
     if (!decrypted && p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP) {
         if (channels.setBridgePresetCryptoForHash(p->channel)) {
             memcpy(bytes, p->encrypted.bytes, rawSize);

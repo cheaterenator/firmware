@@ -574,23 +574,31 @@ bool Channels::setBridgePresetCryptoForHash(ChannelHash channelHash)
     // Only the presets configured for bridging are tried - not every known preset - so an operator
     // opts a specific pair (or set) of meshes into cross-preset visibility rather than every preset
     // silently becoming reachable from every other one. See mesh/udp/UdpBridgePresets.h.
-    for (size_t i = 0; i < udpBridgePresetsCount; ++i) {
-        const char *name = DisplayFormatters::getModemPresetDisplayName(udpBridgePresets[i], false, true);
+    auto trySetCryptoForName = [channelHash](const char *name) {
         if (!name || strcmp(name, "Invalid") == 0)
-            continue; // skip invalid placeholder
+            return false; // skip invalid placeholder
         uint8_t h = xorHash((const uint8_t *)name, strlen(name));
         // Expand default PSK alias 1 to actual bytes and xor into hash
         uint8_t tmp = h ^ xorHash(defaultpsk, sizeof(defaultpsk));
-        if (tmp == channelHash) {
-            // Set crypto to defaultpsk and report success
-            CryptoKey k;
-            memcpy(k.bytes, defaultpsk, sizeof(defaultpsk));
-            k.length = sizeof(defaultpsk);
-            crypto->setKey(k);
-            LOG_INFO("UDP bridge: matched preset '%s' for hash 0x%x; set default PSK", name, channelHash);
+        if (tmp != channelHash)
+            return false;
+        // Set crypto to defaultpsk and report success
+        CryptoKey k;
+        memcpy(k.bytes, defaultpsk, sizeof(defaultpsk));
+        k.length = sizeof(defaultpsk);
+        crypto->setKey(k);
+        LOG_INFO("UDP bridge: matched channel '%s' for hash 0x%x; set default PSK", name, channelHash);
+        return true;
+    };
+    for (size_t i = 0; i < udpBridgePresetsCount; ++i) {
+        if (trySetCryptoForName(DisplayFormatters::getModemPresetDisplayName(udpBridgePresets[i], false, true)))
             return true;
-        }
     }
+#if UDP_BRIDGE_CUSTOM
+    // The name getName() gives an unnamed channel under custom modem settings
+    if (trySetCryptoForName("Custom"))
+        return true;
+#endif
 #else
     (void)channelHash;
 #endif
