@@ -2,6 +2,11 @@
 #include "ProtobufModule.h"
 #include <map>
 
+/// After we answer a sender's NodeInfo request, further requests from it go unanswered for this long.
+#ifndef USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS
+#define USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS (12 * 60 * 60)
+#endif
+
 /**
  * NodeInfo module for sending/receiving NodeInfos into the mesh
  */
@@ -65,7 +70,7 @@ class NodeInfoModule : public ProtobufModule<meshtastic_User>, private concurren
     bool deferHistoryStamp = false;
     bool suppressReplyForCurrentRequest = false;
     /// Sender -> uptime seconds (Time::getUptimeSecs()) at our last reply. Seconds, not millis:
-    /// the suppression window is hours wide. See handleReceivedProtobuf().
+    /// the suppression window is hours wide. Stamped in allocReply(), read in handleReceivedProtobuf().
     std::map<NodeNum, uint32_t> lastNodeInfoSeen;
 
     void pruneLastNodeInfoCache();

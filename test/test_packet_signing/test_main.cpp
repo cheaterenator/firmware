@@ -31,6 +31,7 @@
 #include "mesh/ReliableRouter.h"
 #include "mesh/Router.h"
 #include "mesh/SinglePortModule.h"
+#include "mesh/TransmitHistory.h"
 #include "modules/NodeInfoModule.h"
 #include "modules/RoutingModule.h"
 #include "mqtt/MQTT.h"
@@ -441,6 +442,9 @@ void tearDown(void)
     // suppression-window cases drive; the region and the AirTime swap are C14's duty-cycle setup.
     Time::useRealClock();
     Time::resetMonotonicForTests();
+    // N13 arms NodeInfoModule's send floor through TransmitHistory; drop it so no later case inherits it.
+    delete transmitHistory;
+    transmitHistory = nullptr;
     config.lora.region = meshtastic_Config_LoRaConfig_RegionCode_US;
     initRegion();
     if (c14SavedAirTime) {
@@ -1789,7 +1793,8 @@ void test_N7_unsigned_unicast_nodeinfo_from_nonsigner_changes_name(void)
 }
 
 // ---------------------------------------------------------------------------
-// N8-N11: the 12h reply-suppression window.
+// N8-N13: the reply-suppression window (USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS, 12h by default) and
+// the send floor a request meets.
 //
 // The stamp is uptime SECONDS, not milliseconds: entries live for as long as the node stays in the
 // DB, so a 32-bit millisecond stamp aliased back into the window once uptime passed 49.7 days and
@@ -1797,12 +1802,14 @@ void test_N7_unsigned_unicast_nodeinfo_from_nonsigner_changes_name(void)
 // waiting.
 // ---------------------------------------------------------------------------
 
-static constexpr uint32_t kSuppressSecs = 12 * 60 * 60;
+static constexpr uint32_t kSuppressSecs = USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS;
 
-// Deliver a NodeInfo request from `sender` and report whether we would reply to it.
-static bool wouldReplyToNodeInfoRequest(NodeInfoTestShim &shim, NodeNum sender)
+// Deliver a NodeInfo request from `sender` and report whether we would reply to it. Addressed to us
+// by default, as a request from a client is; a request addressed to us meets the 60 s gate rather
+// than the routine floor, so these window cases do not depend on transmit history.
+static bool wouldReplyToNodeInfoRequest(NodeInfoTestShim &shim, NodeNum sender, NodeNum to = LOCAL_NODE)
 {
-    meshtastic_MeshPacket mp = makeDecoded(sender, NODENUM_BROADCAST, meshtastic_PortNum_NODEINFO_APP, SMALL_PAYLOAD);
+    meshtastic_MeshPacket mp = makeDecoded(sender, to, meshtastic_PortNum_NODEINFO_APP, SMALL_PAYLOAD);
     mp.decoded.want_response = true;
     meshtastic_User user = meshtastic_User_init_zero;
     user.is_licensed = owner.is_licensed;
@@ -1836,8 +1843,9 @@ void test_N8_second_request_inside_the_window_is_suppressed(void)
     NodeInfoTestShim shim;
     TEST_ASSERT_TRUE_MESSAGE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE), "first request must be answered");
 
-    advanceUptime(60 * 60 * 1000); // 1h later, well inside the 12h window
-    TEST_ASSERT_FALSE_MESSAGE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE), "repeat request inside 12h must be suppressed");
+    advanceUptime(kSuppressSecs / 2 * 1000); // halfway through the window
+    TEST_ASSERT_FALSE_MESSAGE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE),
+                              "repeat request inside the window must be suppressed");
 }
 
 void test_N9_request_after_the_window_is_answered(void)
@@ -1893,6 +1901,44 @@ void test_N11_window_still_applies_across_the_wrap(void)
     advanceUptime((kSuppressSecs + 60) * 1000);
     TEST_ASSERT_TRUE_MESSAGE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE),
                              "and must still release once 12h have passed across the wrap");
+}
+
+// The window runs from our answer, not from the latest request. A repeat that is itself suppressed
+// must not push it forward, or a sender asking more often than the window would never be answered.
+void test_N12_a_suppressed_request_does_not_extend_the_window(void)
+{
+    mockNodeDB->addNode(REMOTE_NODE);
+    Time::setTestMillis(60 * 1000);
+    Time::serviceMonotonic();
+
+    NodeInfoTestShim shim;
+    TEST_ASSERT_TRUE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE));
+
+    advanceUptime(kSuppressSecs / 2 * 1000);
+    TEST_ASSERT_FALSE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE));
+
+    advanceUptime((kSuppressSecs / 2 + 60) * 1000); // past the window measured from the answer
+    TEST_ASSERT_TRUE_MESSAGE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE),
+                             "a suppressed repeat must not restart the window");
+}
+
+// A request addressed to us meets the 60 s gate, not the 30 minute routine floor; a broadcast
+// request, which every neighbour answers at once, still meets the floor. The broadcast is refused
+// first, so this also pins that a request we did not answer opens no suppression window.
+void test_N13_a_request_addressed_to_us_skips_the_routine_floor(void)
+{
+    mockNodeDB->addNode(REMOTE_NODE);
+    Time::setTestMillis(60 * 60 * 1000);
+    Time::serviceMonotonic();
+    transmitHistory = TransmitHistory::getInstance();
+    transmitHistory->setLastSentToMesh(meshtastic_PortNum_NODEINFO_APP);
+    advanceUptime(5 * 60 * 1000); // past the 60 s gate, inside the 30 minute floor
+
+    NodeInfoTestShim shim;
+    TEST_ASSERT_FALSE_MESSAGE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE, NODENUM_BROADCAST),
+                              "a broadcast request must still meet the routine floor");
+    TEST_ASSERT_TRUE_MESSAGE(wouldReplyToNodeInfoRequest(shim, REMOTE_NODE),
+                             "a request addressed to us must only meet the 60 s gate");
 }
 
 void test_L1_licensed_nodeinfo_publishes_public_key(void)
@@ -2451,6 +2497,8 @@ void setup()
     RUN_TEST(test_N9_request_after_the_window_is_answered);
     RUN_TEST(test_N10_stale_stamp_does_not_alias_after_a_full_wrap);
     RUN_TEST(test_N11_window_still_applies_across_the_wrap);
+    RUN_TEST(test_N12_a_suppressed_request_does_not_extend_the_window);
+    RUN_TEST(test_N13_a_request_addressed_to_us_skips_the_routine_floor);
 
     printf("\n=== Group L: licensed identity and plaintext signing ===\n");
     RUN_TEST(test_L1_licensed_nodeinfo_publishes_public_key);
