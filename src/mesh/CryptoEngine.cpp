@@ -171,13 +171,48 @@ static size_t buildSigningBuffer(uint8_t *buf, size_t bufSize, uint32_t fromNode
     return totalLen;
 }
 
+// The one sender for which a v1 buffer and a legacy buffer can hold the same bytes: v1 opens with
+// the version byte 0x01 followed by LE32(from), legacy opens with LE32(from), and the two line up
+// only when every byte of LE32(from) is 0x01.
+static constexpr uint32_t XEDDSA_LEGACY_AMBIGUOUS_NODE = 0x01010101;
+
+/**
+ * The layout builds before #11422 sign with: from(4) | id(4) | portnum(4) | payload(N), integers
+ * little-endian (the old code copied host-order words, and every target is little-endian).
+ *
+ * Only those four fields are covered, so a legacy-signed packet's other envelope fields stay
+ * rewritable by any PSK holder - the exposure those builds already have. Accepting this layout on
+ * verify does not weaken v1-signed packets: a signature verifies only over the bytes it was made
+ * on, and apart from XEDDSA_LEGACY_AMBIGUOUS_NODE, which is refused here, no packet's legacy buffer
+ * equals another packet's v1 buffer. The fixed 12-byte header keeps the layout unambiguous within
+ * itself.
+ */
+static size_t buildLegacySigningBuffer(uint8_t *buf, size_t bufSize, uint32_t fromNode, uint32_t packetId,
+                                       const meshtastic_Data *d)
+{
+    if (!d || fromNode == XEDDSA_LEGACY_AMBIGUOUS_NODE)
+        return 0;
+    const size_t headerLen = 3 * sizeof(uint32_t);
+    const size_t totalLen = headerLen + d->payload.size;
+    if (totalLen > bufSize)
+        return 0;
+
+    putLE32(buf, fromNode);
+    putLE32(buf + sizeof(uint32_t), packetId);
+    putLE32(buf + 2 * sizeof(uint32_t), (uint32_t)d->portnum);
+    if (d->payload.size)
+        memcpy(buf + headerLen, d->payload.bytes, d->payload.size);
+    return totalLen;
+}
+
 bool CryptoEngine::xeddsa_sign(uint32_t fromNode, uint32_t packetId, uint32_t toNode, const meshtastic_Data *d,
                                uint8_t *signature)
 {
     if (memfll(xeddsa_private_key, 0, sizeof(xeddsa_private_key)))
         return false;
     uint8_t sigBuf[XEDDSA_SIGN_BUF_LEN];
-    size_t sigLen = buildSigningBuffer(sigBuf, sizeof(sigBuf), fromNode, packetId, toNode, d);
+    size_t sigLen = xeddsaSignLegacy ? buildLegacySigningBuffer(sigBuf, sizeof(sigBuf), fromNode, packetId, d)
+                                     : buildSigningBuffer(sigBuf, sizeof(sigBuf), fromNode, packetId, toNode, d);
     if (sigLen == 0)
         return false;
     // XEdDSA::sign mixes signature[0..31] into the nonce as the spec's random Z (meshtastic/Crypto#3)
@@ -197,11 +232,16 @@ bool CryptoEngine::xeddsa_verify(const uint8_t *pubKey, uint32_t fromNode, uint3
         curve_to_ed_pub(pubKey, cached_ed_pubkey);
         memcpy(cached_curve_pubkey, pubKey, 32);
     }
-    uint8_t sigBuf[XEDDSA_SIGN_BUF_LEN];
-    size_t sigLen = buildSigningBuffer(sigBuf, sizeof(sigBuf), fromNode, packetId, toNode, d);
-    if (sigLen == 0)
-        return false;
-    return XEdDSA::verify(signature, cached_ed_pubkey, sigBuf, sigLen);
+    // Both layouts are accepted so nodes on either side of the #11422 layout change stay verifiable,
+    // and therefore relayable, while the mesh migrates. The layout we sign with goes first, since the
+    // peers we share a build with sign the same way; a mismatch costs one extra verify.
+    auto verifyLayout = [&](bool legacy) {
+        uint8_t sigBuf[XEDDSA_SIGN_BUF_LEN];
+        const size_t sigLen = legacy ? buildLegacySigningBuffer(sigBuf, sizeof(sigBuf), fromNode, packetId, d)
+                                     : buildSigningBuffer(sigBuf, sizeof(sigBuf), fromNode, packetId, toNode, d);
+        return sigLen != 0 && XEdDSA::verify(signature, cached_ed_pubkey, sigBuf, sigLen);
+    };
+    return verifyLayout(xeddsaSignLegacy) || verifyLayout(!xeddsaSignLegacy);
 }
 
 void CryptoEngine::curve_to_ed_pub(const uint8_t *curve_pubkey, uint8_t *ed_pubkey)

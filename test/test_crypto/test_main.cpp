@@ -22,7 +22,9 @@ void HexToBytes(uint8_t *result, const std::string hex, size_t len = 0)
 
 void setUp(void)
 {
-    // set stuff up here
+    // The XEdDSA cases pin what the v1 layout covers, but the build signs the legacy layout by
+    // default (USERPREFS_XEDDSA_SIGN_LEGACY). Opt in here; the legacy cases switch it themselves.
+    crypto->setXeddsaSignLegacy(false);
 }
 
 void tearDown(void)
@@ -418,6 +420,112 @@ void test_XEdDSA_repeated_sign_is_randomized(void)
                              "signatures must differ - XEdDSA Z randomization is not wired through");
     TEST_ASSERT_TRUE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &d, sig1));
     TEST_ASSERT_TRUE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &d, sig2));
+}
+
+// Builds before #11422 sign [from | id | portnum | payload]. A legacy signature must be byte-for-byte
+// that old buffer, and each layout must verify on a node that signs with the other one - that is
+// what keeps both halves of a mixed mesh verifiable and relayable.
+void test_XEdDSA_legacy_layout_interop(void)
+{
+    uint8_t pub[32], priv[32], edPub[32], sigLegacy[64], sigV1[64];
+    uint8_t message[] = "legacy interop";
+    const uint32_t fromNode = 0x1234, packetId = 0xDEADBEEF, toNode = 0xFFFFFFFF;
+    meshtastic_Data d = makeSignableData(message, sizeof(message), 3);
+
+    crypto->generateKeyPair(pub, priv);
+    crypto->setXeddsaSignLegacy(true);
+    TEST_ASSERT(crypto->xeddsa_sign(fromNode, packetId, toNode, &d, sigLegacy));
+
+    // The buffer as the pre-#11422 code built it: host-order words, then the payload.
+    uint8_t oldBuf[3 * sizeof(uint32_t) + sizeof(message)];
+    const uint32_t portnum = d.portnum;
+    memcpy(oldBuf, &fromNode, sizeof(uint32_t));
+    memcpy(oldBuf + 4, &packetId, sizeof(uint32_t));
+    memcpy(oldBuf + 8, &portnum, sizeof(uint32_t));
+    memcpy(oldBuf + 12, message, sizeof(message));
+    crypto->curve_to_ed_pub(pub, edPub);
+    TEST_ASSERT_TRUE_MESSAGE(XEdDSA::verify(sigLegacy, edPub, oldBuf, sizeof(oldBuf)),
+                             "a legacy signature must cover exactly the pre-#11422 buffer");
+
+    TEST_ASSERT_TRUE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &d, sigLegacy));
+    crypto->setXeddsaSignLegacy(false);
+    TEST_ASSERT_TRUE_MESSAGE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &d, sigLegacy),
+                             "a v1-signing node must accept a legacy signature");
+
+    TEST_ASSERT(crypto->xeddsa_sign(fromNode, packetId, toNode, &d, sigV1));
+    crypto->setXeddsaSignLegacy(true);
+    TEST_ASSERT_TRUE_MESSAGE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &d, sigV1),
+                             "a legacy-signing node must accept a v1 signature");
+}
+
+// The legacy layout still binds sender, packet id, portnum and payload. The envelope fields it never
+// covered stay uncovered for legacy-signed packets only; test_XEdDSA pins that v1 signatures keep
+// their full coverage with the legacy fallback in place.
+void test_XEdDSA_legacy_layout_coverage(void)
+{
+    uint8_t pub[32], priv[32], signature[64];
+    uint8_t message[] = "legacy coverage";
+    const uint32_t fromNode = 0x4321, packetId = 0x0BADF00D, toNode = 0xFFFFFFFF;
+    meshtastic_Data d = makeSignableData(message, sizeof(message), 3);
+    d.reply_id = 0x1111;
+
+    crypto->generateKeyPair(pub, priv);
+    crypto->setXeddsaSignLegacy(true);
+    TEST_ASSERT(crypto->xeddsa_sign(fromNode, packetId, toNode, &d, signature));
+    TEST_ASSERT_TRUE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &d, signature));
+
+    TEST_ASSERT_FALSE_MESSAGE(crypto->xeddsa_verify(pub, fromNode + 1, packetId, toNode, &d, signature),
+                              "reattribution to another sender must fail");
+    TEST_ASSERT_FALSE_MESSAGE(crypto->xeddsa_verify(pub, fromNode, packetId + 1, toNode, &d, signature),
+                              "replay under another packet id must fail");
+
+    meshtastic_Data t = d;
+    t.portnum = (meshtastic_PortNum)(d.portnum + 1);
+    TEST_ASSERT_FALSE_MESSAGE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &t, signature),
+                              "portnum redirection must fail");
+
+    t = d;
+    t.payload.bytes[0] ^= 0x01;
+    TEST_ASSERT_FALSE_MESSAGE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &t, signature),
+                              "payload tampering must fail");
+
+    t = d;
+    t.reply_id++;
+    TEST_ASSERT_TRUE_MESSAGE(crypto->xeddsa_verify(pub, fromNode, packetId, toNode, &t, signature),
+                             "the legacy layout never covered reply_id");
+}
+
+// For sender 0x01010101 alone, a v1 buffer re-read as a legacy one yields a different, valid-looking
+// packet: same bytes, so the v1 signature would verify for it. The legacy layout is refused for that
+// sender, which is what keeps the fallback from reinterpreting v1 signatures.
+void test_XEdDSA_legacy_cannot_reread_v1(void)
+{
+    uint8_t pub[32], priv[32], edPub[32], signature[64];
+    uint8_t payload[] = "abc";
+    const uint32_t fromNode = 0x01010101, packetId = 0x05332211, toNode = 0xFF000000;
+    meshtastic_Data a = makeSignableData(payload, sizeof(payload), 1);
+
+    crypto->generateKeyPair(pub, priv);
+    TEST_ASSERT(crypto->xeddsa_sign(fromNode, packetId, toNode, &a, signature)); // v1, from setUp
+
+    // Packet a's v1 buffer, spelled out: version | from | id | to | portnum | request_id | reply_id
+    // | emoji | bitfield | flags | payload.
+    uint8_t v1[XEDDSA_SIGNED_HEADER_LEN + sizeof(payload)] = {
+        0x01, 0x01, 0x01, 0x01, 0x01, 0x11, 0x22, 0x33, 0x05, 0x00, 0x00, 0x00, 0xFF, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    memcpy(v1 + XEDDSA_SIGNED_HEADER_LEN, payload, sizeof(payload));
+    crypto->curve_to_ed_pub(pub, edPub);
+    TEST_ASSERT_TRUE_MESSAGE(XEdDSA::verify(signature, edPub, v1, sizeof(v1)),
+                             "the spelled-out v1 buffer must be what was signed");
+
+    // The same bytes read as legacy: from | id 0x33221101 | portnum 5 | the remaining 26 bytes.
+    meshtastic_Data b = makeSignableData(v1 + 12, sizeof(v1) - 12, 5);
+    TEST_ASSERT_FALSE_MESSAGE(crypto->xeddsa_verify(pub, fromNode, 0x33221101, toNode, &b, signature),
+                              "a v1 signature must not verify as a legacy one");
+
+    crypto->setXeddsaSignLegacy(true);
+    TEST_ASSERT_FALSE_MESSAGE(crypto->xeddsa_sign(fromNode, packetId, toNode, &a, signature),
+                              "the legacy layout must not be signed for the ambiguous sender");
 }
 
 void test_AES_CTR(void)
@@ -930,6 +1038,9 @@ void setup()
     RUN_TEST(test_XEdDSA_curve_to_ed_cache);
     RUN_TEST(test_XEdDSA_max_payload);
     RUN_TEST(test_XEdDSA_repeated_sign_is_randomized);
+    RUN_TEST(test_XEdDSA_legacy_layout_interop);
+    RUN_TEST(test_XEdDSA_legacy_layout_coverage);
+    RUN_TEST(test_XEdDSA_legacy_cannot_reread_v1);
     RUN_TEST(test_AES_CCM_AEAD_smoke);
     RUN_TEST(test_AES_CCM_AEAD_roundtrip_aes256);
     RUN_TEST(test_AES_CCM_AEAD_rejects_tampering);
