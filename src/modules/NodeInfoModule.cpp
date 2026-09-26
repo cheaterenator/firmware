@@ -12,10 +12,6 @@
 #include <Throttle.h>
 #include <algorithm>
 
-#ifndef USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS
-#define USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS (12 * 60 * 60)
-#endif
-
 NodeInfoModule *nodeInfoModule;
 
 static constexpr uint32_t NodeInfoReplySuppressSeconds = USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS;
@@ -31,18 +27,18 @@ bool NodeInfoModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
 
     auto p = *pptr;
 
-    // Suppress replies to senders we've replied to recently (12H window)
+    // Suppress replies to senders we answered recently (USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS). The
+    // stamp is taken in allocReply() when a reply is actually built, so a request that goes unanswered
+    // - suppressed here, throttled, or refused on channel utilisation - does not move the window: a
+    // sender that keeps asking would otherwise never be answered at all.
     if (mp.decoded.want_response && !isFromUs(&mp)) {
-        const NodeNum sender = getFrom(&mp);
         // A local dedup window, not a wall-clock reading - uptime avoids RTC jumps and replayed
         // packets' stale rx_time perturbing it. Seconds, not millis - this is a wide window.
         const uint32_t nowSecs = Time::getUptimeSecs();
-        auto it = lastNodeInfoSeen.find(sender);
+        auto it = lastNodeInfoSeen.find(getFrom(&mp));
         if (it != lastNodeInfoSeen.end() && (uint32_t)(nowSecs - it->second) < NodeInfoReplySuppressSeconds) {
             suppressReplyForCurrentRequest = true;
         }
-        lastNodeInfoSeen[sender] = nowSecs;
-        pruneLastNodeInfoCache();
     }
 
     if (p.is_licensed != owner.is_licensed) {
@@ -159,7 +155,7 @@ meshtastic_MeshPacket *NodeInfoModule::allocReply()
                                              currentRequest->decoded.want_response && !isFromUs(currentRequest);
 
     if (suppressReplyForCurrentRequest && isReplyingToExternalRequest) {
-        LOG_DEBUG("Skip send NodeInfo since we heard the requester <12h ago");
+        LOG_DEBUG("Skip send NodeInfo since we answered the requester <%us ago", (unsigned)NodeInfoReplySuppressSeconds);
         ignoreRequest = true;
         suppressReplyForCurrentRequest = false;
         return NULL;
@@ -183,11 +179,15 @@ meshtastic_MeshPacket *NodeInfoModule::allocReply()
             timeoutMs = hamMs;
     }
     uint32_t lastNodeInfo = transmitHistory ? transmitHistory->getLastSentToMeshMillis(meshtastic_PortNum_NODEINFO_APP) : 0;
-    if (!shorterTimeout && lastNodeInfo && Throttle::isWithinTimespanMs(lastNodeInfo, timeoutMs)) {
+    // A request addressed to this node is someone asking for us right now, so it gets the interactive
+    // gate rather than the routine floor; the per-requester window above keeps any one sender from
+    // repeating it. A broadcast request reaches every neighbour at once and keeps the floor.
+    const bool interactive = shorterTimeout || (isReplyingToExternalRequest && isToUs(currentRequest));
+    if (!interactive && lastNodeInfo && Throttle::isWithinTimespanMs(lastNodeInfo, timeoutMs)) {
         LOG_DEBUG("Skip send NodeInfo since we sent it <%us ago", timeoutMs / 1000);
         ignoreRequest = true; // Mark it as ignored for MeshModule
         return NULL;
-    } else if (shorterTimeout && lastNodeInfo && Throttle::isWithinTimespanMs(lastNodeInfo, 60 * 1000)) {
+    } else if (interactive && lastNodeInfo && Throttle::isWithinTimespanMs(lastNodeInfo, 60 * 1000)) {
         // For interactive/urgent requests (e.g., user-triggered or implicit requests), use a shorter 60s timeout
         LOG_DEBUG("Skip send NodeInfo since we sent it <60s ago");
         ignoreRequest = true;
@@ -208,6 +208,11 @@ meshtastic_MeshPacket *NodeInfoModule::allocReply()
         // the next one, and the floor it would sit out is 30 minutes.
         if (transmitHistory && !deferHistoryStamp)
             transmitHistory->setLastSentToMesh(meshtastic_PortNum_NODEINFO_APP);
+        // Open the requester's suppression window only now that it is getting an answer.
+        if (isReplyingToExternalRequest) {
+            lastNodeInfoSeen[getFrom(currentRequest)] = Time::getUptimeSecs();
+            pruneLastNodeInfoCache();
+        }
         return allocDataProtobuf(u);
     }
 }

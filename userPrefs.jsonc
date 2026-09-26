@@ -119,7 +119,7 @@
   // "USERPREFS_MESH_BEACON_TARGET_3_REGION": "meshtastic_Config_LoRaConfig_RegionCode_EU_868",
   // "USERPREFS_MESH_BEACON_TARGET_3_CHANNEL_INDEX": "3",
   // "USERPREFS_RINGTONE_NAG_SECS": "60",
-  // "USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS": "43200",
+  "USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS": "600", // After answering a node's NodeInfo request, ignore its further requests for this long (default 43200)
   // "USERPREFS_XEDDSA_SIGN_LEGACY": "false", // Sign in the v1 whole-envelope layout (#11422) instead of the legacy one; both layouts are always accepted
   // "USERPREFS_UI_TEST_LOG": "true", // Test-only: emits `Screen: frame N/M name=... reason=...` log per UI transition (for the meshtastic-mcp ui test tier); off in release builds.
   "USERPREFS_RINGTONE_RTTTL": "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p",
