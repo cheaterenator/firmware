@@ -326,6 +326,10 @@ void MeshService::handleToRadio(meshtastic_MeshPacket &p)
         p.decoded.portnum == meshtastic_PortNum_ADMIN_APP)
         adminModule->noteOutgoingAdminRequest(p);
 #endif
+    // Note NodeInfo requests too: if the remote stays silent, NodeInfoModule prompts it in a way every
+    // firmware answers at once.
+    if (nodeInfoModule)
+        nodeInfoModule->noteOutgoingNodeInfoRequest(p);
 
     // Send the packet into the mesh
     DEBUG_HEAP_BEFORE;

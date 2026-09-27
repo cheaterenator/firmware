@@ -1979,6 +1979,59 @@ void test_N13_a_request_addressed_to_us_skips_the_routine_floor(void)
                              "a request addressed to us must only meet the 60 s gate");
 }
 
+// N14-N15: a client's NodeInfo request that no NodeInfo answers within 20 s gets a PKI_UNKNOWN_PUBKEY
+// fallback, which every firmware answers with its NodeInfo outside the reply throttles.
+static meshtastic_MeshPacket makeClientNodeInfoRequest(NodeNum to, PacketId id)
+{
+    meshtastic_MeshPacket req = makeDecoded(0, to, meshtastic_PortNum_NODEINFO_APP, SMALL_PAYLOAD);
+    req.decoded.want_response = true;
+    req.id = id;
+    req.hop_limit = 3;
+    return req;
+}
+
+void test_N14_unanswered_nodeinfo_request_prompts_the_target_once(void)
+{
+    Time::setTestMillis(60 * 60 * 1000);
+    Time::serviceMonotonic();
+    NodeInfoTestShim shim;
+    shim.noteOutgoingNodeInfoRequest(makeClientNodeInfoRequest(REMOTE_NODE, 0x4E000014));
+
+    shim.runRequestFallbackForTests();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, pipelineRouting->ackCalls, "nothing before the window closes");
+
+    advanceUptime(21 * 1000);
+    shim.runRequestFallbackForTests();
+    TEST_ASSERT_EQUAL_UINT32(1, pipelineRouting->ackCalls);
+    TEST_ASSERT_EQUAL(meshtastic_Routing_Error_PKI_UNKNOWN_PUBKEY, pipelineRouting->lastError);
+    TEST_ASSERT_EQUAL_HEX32(REMOTE_NODE, pipelineRouting->lastTo);
+
+    // A repeat request inside the hold-off adds nothing: the target's 60 s gate would ignore it.
+    shim.noteOutgoingNodeInfoRequest(makeClientNodeInfoRequest(REMOTE_NODE, 0x4E000015));
+    advanceUptime(21 * 1000);
+    shim.runRequestFallbackForTests();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pipelineRouting->ackCalls, "no second fallback inside the hold-off");
+}
+
+void test_N15_a_nodeinfo_from_the_target_cancels_the_fallback(void)
+{
+    mockNodeDB->addNode(REMOTE_NODE);
+    Time::setTestMillis(60 * 60 * 1000);
+    Time::serviceMonotonic();
+    NodeInfoTestShim shim;
+    shim.noteOutgoingNodeInfoRequest(makeClientNodeInfoRequest(REMOTE_NODE, 0x4E000016));
+
+    // Any NodeInfo from the target answers the request - here its routine broadcast.
+    meshtastic_MeshPacket info = makeDecoded(REMOTE_NODE, NODENUM_BROADCAST, meshtastic_PortNum_NODEINFO_APP, SMALL_PAYLOAD);
+    meshtastic_User user = meshtastic_User_init_zero;
+    user.is_licensed = owner.is_licensed;
+    shim.handleReceivedProtobuf(info, &user);
+
+    advanceUptime(21 * 1000);
+    shim.runRequestFallbackForTests();
+    TEST_ASSERT_EQUAL_UINT32(0, pipelineRouting->ackCalls);
+}
+
 void test_L1_licensed_nodeinfo_publishes_public_key(void)
 {
     owner.is_licensed = true;
@@ -2538,6 +2591,8 @@ void setup()
     RUN_TEST(test_N11_window_still_applies_across_the_wrap);
     RUN_TEST(test_N12_a_suppressed_request_does_not_extend_the_window);
     RUN_TEST(test_N13_a_request_addressed_to_us_skips_the_routine_floor);
+    RUN_TEST(test_N14_unanswered_nodeinfo_request_prompts_the_target_once);
+    RUN_TEST(test_N15_a_nodeinfo_from_the_target_cancels_the_fallback);
 
     printf("\n=== Group L: licensed identity and plaintext signing ===\n");
     RUN_TEST(test_L1_licensed_nodeinfo_publishes_public_key);

@@ -4,6 +4,7 @@
 #include "NodeDB.h"
 #include "NodeStatus.h"
 #include "Router.h"
+#include "RoutingModule.h"
 #include "TransmitHistory.h"
 #include "UptimeClock.h"
 #include "configuration.h"
@@ -16,6 +17,12 @@ NodeInfoModule *nodeInfoModule;
 
 static constexpr uint32_t NodeInfoReplySuppressSeconds = USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS;
 
+// How long a client's NodeInfo request waits for any NodeInfo from its target before the fallback
+// fires, and how long after that another fallback to the same target is held off: the target answers
+// the fallback on its 60 s interactive gate, so a sooner one would only be ignored.
+static constexpr uint32_t NodeInfoRequestFallbackMs = 20 * 1000;
+static constexpr uint32_t NodeInfoRequestFallbackHoldMs = 60 * 1000;
+
 bool NodeInfoModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_User *pptr)
 {
     suppressReplyForCurrentRequest = false;
@@ -26,6 +33,12 @@ bool NodeInfoModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
     }
 
     auto p = *pptr;
+
+    // Any NodeInfo from a remote a client is waiting on answers that request, whatever its shape.
+    for (auto &req : pendingRequests) {
+        if (req.target == getFrom(&mp))
+            req = {};
+    }
 
     // Suppress replies to senders we answered recently (USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS). The
     // stamp is taken in allocReply() when a reply is actually built, so a request that goes unanswered
@@ -146,6 +159,88 @@ void NodeInfoModule::triggerImmediateNodeInfoCheck()
     setIntervalFromNow(0);
 }
 
+void NodeInfoModule::noteOutgoingNodeInfoRequest(const meshtastic_MeshPacket &p)
+{
+    if (p.which_payload_variant != meshtastic_MeshPacket_decoded_tag || p.decoded.portnum != meshtastic_PortNum_NODEINFO_APP ||
+        !p.decoded.want_response || p.to == 0 || isBroadcast(p.to) || p.to == nodeDB->getNodeNum())
+        return;
+
+    const uint32_t now = Time::getMillis();
+    PendingNodeInfoRequest *slot = nullptr;
+    for (auto &req : pendingRequests) {
+        if (req.target != p.to)
+            continue;
+        // Already waiting on this target, or its fallback went out too recently to be answered again.
+        if (!req.fallbackSent || Throttle::isWithinTimespanMs(req.sentMs, NodeInfoRequestFallbackHoldMs))
+            return;
+        slot = &req;
+        break;
+    }
+    if (!slot) {
+        // New target: take a free entry, otherwise the one noted longest ago.
+        slot = &pendingRequests[0];
+        for (auto &req : pendingRequests) {
+            if (req.target == 0) {
+                slot = &req;
+                break;
+            }
+            if ((uint32_t)(now - req.sentMs) > (uint32_t)(now - slot->sentMs))
+                slot = &req;
+        }
+    }
+
+    slot->target = p.to;
+    slot->requestId = p.id;
+    slot->sentMs = Time::skipZero(now);
+    slot->channel = p.channel;
+    slot->hopLimit = p.hop_limit ? p.hop_limit : Default::getConfiguredOrDefaultHopLimit(config.lora.hop_limit);
+    slot->fallbackSent = false;
+
+    // The new entry has the full window, so the soonest deadline is whichever pending one is earlier.
+    uint32_t nextMs = NodeInfoRequestFallbackMs;
+    for (const auto &req : pendingRequests) {
+        if (req.target && !req.fallbackSent)
+            nextMs = std::min(nextMs, Throttle::remainingMs(req.sentMs, NodeInfoRequestFallbackMs));
+    }
+    requestFallbackTimer->setIntervalFromNow(nextMs);
+    requestFallbackTimer->enabled = true;
+}
+
+/**
+ * A NodeInfo request can go unanswered for reasons the requester cannot fix: the target's reply
+ * throttles (a 12 h per-requester window and a 30 minute floor on builds without our fixes) drop it
+ * silently. Every firmware since 2.5 answers PKI_UNKNOWN_PUBKEY with its NodeInfo at once, on the
+ * 60 s interactive gate and outside those throttles, so send that when no NodeInfo from the target
+ * has arrived in time. It repurposes the error: the target logs a PKI decrypt failure that did not
+ * happen. The NodeInfo it sends carries no request_id, so clients see a node update rather than an
+ * answered request.
+ */
+int32_t NodeInfoModule::runRequestFallback()
+{
+    uint32_t nextMs = 0;
+    for (auto &req : pendingRequests) {
+        if (!req.target || req.fallbackSent)
+            continue;
+        const uint32_t remaining = Throttle::remainingMs(req.sentMs, NodeInfoRequestFallbackMs);
+        if (remaining) {
+            nextMs = nextMs ? std::min(nextMs, remaining) : remaining;
+            continue;
+        }
+        if (!routingModule || (airTime && !airTime->isTxAllowedChannelUtil(true))) {
+            LOG_DEBUG("NodeInfo request to 0x%08x unanswered, channel too busy for the fallback", req.target);
+            req = {};
+            continue;
+        }
+        LOG_INFO("No NodeInfo from 0x%08x %us after the client's request; prompt it with PKI_UNKNOWN_PUBKEY", req.target,
+                 (unsigned)(NodeInfoRequestFallbackMs / 1000));
+        routingModule->sendAckNak(meshtastic_Routing_Error_PKI_UNKNOWN_PUBKEY, req.target, req.requestId, req.channel,
+                                  req.hopLimit);
+        req.fallbackSent = true;
+        req.sentMs = Time::skipZero(Time::getMillis());
+    }
+    return nextMs ? (int32_t)nextMs : requestFallbackTimer->disable();
+}
+
 meshtastic_MeshPacket *NodeInfoModule::allocReply()
 {
     // Only apply suppression when actually replying to someone else's request, not for periodic broadcasts.
@@ -254,6 +349,10 @@ NodeInfoModule::NodeInfoModule()
 
     setIntervalFromNow(setStartDelay()); // Send our initial owner announcement 30 seconds
                                          // after we start (to give network time to setup)
+
+    // Idle until a client's NodeInfo request is noted.
+    requestFallbackTimer.reset(new concurrency::Periodic("NodeInfoFallback", [this]() { return runRequestFallback(); }));
+    requestFallbackTimer->disable();
 }
 
 int32_t NodeInfoModule::runOnce()

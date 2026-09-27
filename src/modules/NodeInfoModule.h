@@ -1,6 +1,8 @@
 #pragma once
 #include "ProtobufModule.h"
+#include "concurrency/Periodic.h"
 #include <map>
+#include <memory>
 
 /// After we answer a sender's NodeInfo request, further requests from it go unanswered for this long.
 #ifndef USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS
@@ -35,7 +37,14 @@ class NodeInfoModule : public ProtobufModule<meshtastic_User>, private concurren
      */
     void triggerImmediateNodeInfoCheck();
 
+    /**
+     * Note a client's NodeInfo request on its way to a remote. If no NodeInfo from that remote has
+     * arrived NodeInfoRequestFallbackMs later, prompt it with PKI_UNKNOWN_PUBKEY - see runRequestFallback().
+     */
+    void noteOutgoingNodeInfoRequest(const meshtastic_MeshPacket &p);
+
 #ifdef PIO_UNIT_TESTING
+    int32_t runRequestFallbackForTests() { return runRequestFallback(); }
     /// Test-only reads of the routine-broadcast countdown a send re-arms. concurrency::OSThread is a
     /// private base, so only this class can reach it - a test shim cannot.
     unsigned long broadcastCountdownMsForTests() const { return interval; }
@@ -73,6 +82,20 @@ class NodeInfoModule : public ProtobufModule<meshtastic_User>, private concurren
     /// the suppression window is hours wide. Stamped in allocReply(), read in handleReceivedProtobuf().
     std::map<NodeNum, uint32_t> lastNodeInfoSeen;
 
+    /// A client's NodeInfo request still waiting for any NodeInfo from its target. Once the fallback
+    /// has fired, sentMs is re-stamped and the entry holds off another one for that target.
+    struct PendingNodeInfoRequest {
+        NodeNum target = 0;
+        PacketId requestId = 0;
+        uint32_t sentMs = 0;
+        ChannelIndex channel = 0;
+        uint8_t hopLimit = 0;
+        bool fallbackSent = false;
+    };
+    PendingNodeInfoRequest pendingRequests[4];
+    std::unique_ptr<concurrency::Periodic> requestFallbackTimer;
+
+    int32_t runRequestFallback();
     void pruneLastNodeInfoCache();
 };
 
