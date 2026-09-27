@@ -2,7 +2,7 @@
 # trunk-ignore-all(ruff/F821)
 # trunk-ignore-all(flake8/F821): For SConstruct imports
 import sys
-from os.path import join
+from os.path import exists, join
 import subprocess
 import json
 import re
@@ -298,10 +298,18 @@ try:
 except subprocess.CalledProcessError:
     repo_owner = "unknown"
 
-jsonLoc = env["PROJECT_DIR"] + "/userPrefs.jsonc"
-with open(jsonLoc) as f:
-    jsonStr = re.sub("//.*","", f.read(), flags=re.MULTILINE)
-    userPrefs = json.loads(jsonStr)
+def readUserPrefs(path):
+    with open(path) as f:
+        return json.loads(re.sub("//.*", "", f.read(), flags=re.MULTILINE))
+
+
+userPrefs = readUserPrefs(env["PROJECT_DIR"] + "/userPrefs.jsonc")
+# Private per-checkout settings (gitignored), layered over the shared template key by key.
+localPrefsLoc = env["PROJECT_DIR"] + "/userPrefs.local.jsonc"
+if exists(localPrefsLoc):
+    localPrefs = readUserPrefs(localPrefsLoc)
+    userPrefs.update(localPrefs)
+    print(f"userPrefs.local.jsonc overrides {len(localPrefs)} userPrefs")
 
 # Channels::initDefaultChannel() applies a configured index as a whole, so resolve per-field
 # optionality here: any field the vendor left out gets the value that function would have kept.

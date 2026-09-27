@@ -75,10 +75,6 @@ build/wasm/
 build/wasm-obj/
 build/wasm-*.log
 .emsdk/
-userPrefs.jsonc
-userPrefs.jsonc
-src/modules/OnDemandModule.cpp1111
-userPrefs.jsonc
-userPrefs.jsonc
-userPrefs.jsonc
-userPrefs.jsonc
+
+# Private per-checkout build settings layered over userPrefs.jsonc (bin/platformio-custom.py)
+userPrefs.local.jsonc
