@@ -1,3 +1,4 @@
+#include "MillisGlitchFilter.h"
 #include "PowerFSM.h"
 #include "PowerMon.h"
 #include "configuration.h"
@@ -312,6 +313,17 @@ void esp32Setup()
 void esp32Loop()
 {
     esp_task_wdt_reset(); // service our app level watchdog
+
+#if MILLIS_GLITCH_FILTER
+    // The filter runs in ISR context and cannot log, so report what it dropped from here
+    static uint32_t reportedGlitches;
+    const MillisGlitchStats glitches = getMillisGlitchStats();
+    if (glitches.count != reportedGlitches) {
+        LOG_WARN("millis() glitch: dropped %u read(s) since the last report, the last %ums ahead of its re-read (%u total)",
+                 glitches.count - reportedGlitches, glitches.lastAheadMs, glitches.count);
+        reportedGlitches = glitches.count;
+    }
+#endif
 
     // for debug printing
     // radio.radioIf.canSleep();
