@@ -1,7 +1,8 @@
 // Unit tests for src/UptimeClock.{h,cpp} - the monotonic uptime seam.
 // Covers: test-clock injection, stepping the injected clock, the real-clock fallback, the
 // single-writer wrap carry (readers derive, serviceMonotonic() publishes), rejecting a backward-
-// looking tick instead of folding it in as a near-full wrap, rejecting a second concurrent writer
+// looking tick instead of folding it in as a near-full wrap, dropping a forward glitch a re-read does
+// not repeat, rejecting a second concurrent writer
 // instead of risking a torn read, and the 0-sentinel dodge helpers (skipZero/timerEndsAtMillis).
 // getMillis() itself is a plain 32-bit read with no wrap handling of its own beyond those helpers -
 // deadline/throttle wrap arithmetic built on top of it is tested in test_throttle/.
@@ -267,6 +268,33 @@ void test_monotonic_reader_ignores_small_backward_tick_without_a_publish()
     TEST_ASSERT_EQUAL_UINT64(1517000u, Time::getMillisMonotonic());
 }
 
+// Field log 2026-09-29 (heltec-v2_1): one millis() read landed 68719476 ms (2^36 us) ahead of the reads
+// around it. serviceMonotonic() published it, every later read then looked like a backward tick, and the
+// clock held at the glitch for ~19 h. A glitch that a second read does not repeat must be dropped.
+void test_monotonic_drops_a_single_forward_glitch_of_millis()
+{
+    Time::setTestMillis(51697216u);
+    Time::serviceMonotonic();
+
+    Time::advanceTestMillis(19);
+    Time::glitchNextTestMillis(51697235u + 68719476u);
+    Time::serviceMonotonic();
+    TEST_ASSERT_EQUAL_UINT64(51697235u, Time::getMillisMonotonic());
+
+    advanceAndService(1000); // and it keeps ticking instead of holding
+    TEST_ASSERT_EQUAL_UINT64(51698235u, Time::getMillisMonotonic());
+}
+
+// The re-read must not cost a genuine long gap between publishes: both reads agree, so it counts.
+void test_monotonic_keeps_a_long_gap_that_a_second_read_confirms()
+{
+    Time::setTestMillis(1000);
+    Time::serviceMonotonic();
+
+    advanceAndService(10 * 60 * 1000); // a main loop blocked for ten minutes
+    TEST_ASSERT_EQUAL_UINT64(1000u + 10 * 60 * 1000, Time::getMillisMonotonic());
+}
+
 void test_getUptimeSecs_stays_exact_across_the_wrap()
 {
     Time::setTestMillis(4294967000u); // 4294967 whole seconds, 296ms short of the wrap
@@ -508,6 +536,8 @@ void setup()
     RUN_TEST(test_monotonic_misses_a_wrap_not_serviced_within_the_window);
     RUN_TEST(test_monotonic_ignores_small_backward_tick_of_millis);
     RUN_TEST(test_monotonic_reader_ignores_small_backward_tick_without_a_publish);
+    RUN_TEST(test_monotonic_drops_a_single_forward_glitch_of_millis);
+    RUN_TEST(test_monotonic_keeps_a_long_gap_that_a_second_read_confirms);
     RUN_TEST(test_getUptimeSecs_stays_exact_across_the_wrap);
     RUN_TEST(test_monotonic_exact_with_concurrent_readers);
     RUN_TEST(test_monotonic_reader_completes_while_publish_is_paused);

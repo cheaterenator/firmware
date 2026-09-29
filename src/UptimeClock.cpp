@@ -7,8 +7,11 @@
 uint32_t Time::getMillis()
 {
 #ifdef PIO_UNIT_TESTING
-    if (Time::useTestClock.load(std::memory_order_relaxed))
+    if (Time::useTestClock.load(std::memory_order_relaxed)) {
+        if (Time::testGlitchArmed.exchange(false, std::memory_order_relaxed))
+            return Time::testGlitchMs.load(std::memory_order_relaxed);
         return Time::testNowMs.load(std::memory_order_relaxed);
+    }
 #endif
     return millis();
 }
@@ -39,6 +42,17 @@ std::atomic<Time::MonotonicPublishHook> monotonicPublishHook{nullptr};
 // subtraction to just under UINT32_MAX and got folded straight into the carry, permanently adding
 // ~49.7 days to every later reading.
 constexpr uint32_t kMaxPlausibleAdvanceMs = 0x80000000u;
+
+// serviceMonotonic() re-reads millis() before believing an advance larger than this; see there.
+constexpr uint32_t kConfirmAdvanceMs = 1000;
+
+// serviceMonotonic() runs every main-loop iteration and a hold lasts until millis() catches up, so its
+// error is logged when a hold starts and then once a minute (a field log caught ~50 identical lines a
+// second). Written only by serviceMonotonic(), which writerActive keeps single-threaded.
+constexpr uint32_t kHoldLogIntervalMs = 60 * 1000;
+bool holding = false;
+uint32_t holdLoggedAtMs = 0;
+uint32_t heldSinceLog = 0;
 
 // Extend a published (high, low) snapshot to `now`; unsigned subtraction is exact across the wrap
 // for any gap under 49.7 days. One copy, because reader and writer must agree on it exactly. An
@@ -105,16 +119,37 @@ void Time::serviceMonotonic()
     PublishedSnapshot &active = published[generation & 1u];
     const uint32_t low = active.low.load(std::memory_order_relaxed);
     const uint32_t high = active.high.load(std::memory_order_relaxed);
-    const uint32_t now = getMillis();
+    uint32_t now = getMillis();
     const bool everPublished = high != 0 || low != 0; // see extendPublished()'s (0, 0) sentinel case
+    if (everPublished && (uint32_t)(now - low) > kConfirmAdvanceMs) {
+        // A single millis() read has been seen landing 2^36 us (~19 h) ahead of the reads around it
+        // (heltec-v2_1, field log 2026-09-29). Published, it is the base every later, correct read looks
+        // backward from, and the clock holds for those 19 h. A real step survives a second read and a
+        // glitch does not, so keep whichever read advanced less.
+        const uint32_t again = getMillis();
+        if ((uint32_t)(again - low) < (uint32_t)(now - low)) {
+            const uint32_t ahead = now - again;
+            if (ahead > kConfirmAdvanceMs && ahead < kMaxPlausibleAdvanceMs)
+                LOG_WARN("UptimeClock: dropped a millis() read %ums ahead of its re-read (%u vs %u)", ahead, now, again);
+            now = again;
+        }
+    }
     const uint32_t elapsed = (uint32_t)(now - low);
     if (everPublished && elapsed > kMaxPlausibleAdvanceMs) {
         // Same bound extendPublished() applies, checked again here so the one safe, low-frequency
         // call site (once per main-loop iteration) can log it - extendPublished() itself must stay
         // silent, since getMillisMonotonic() reaches it from arbitrarily hot, concurrent read paths.
-        LOG_ERROR("UptimeClock: holding at high=%u low=%u - implausible advance of %ums since last "
-                  "publish (now=%u), suspected backward tick or a torn read",
-                  high, low, elapsed, now);
+        heldSinceLog++;
+        if (!holding || (uint32_t)(now - holdLoggedAtMs) >= kHoldLogIntervalMs) {
+            LOG_ERROR("UptimeClock: holding at high=%u low=%u - implausible advance of %ums since last "
+                      "publish (now=%u, %u held publishes since the last log), suspected backward tick",
+                      high, low, elapsed, now, heldSinceLog);
+            holdLoggedAtMs = now;
+            heldSinceLog = 0;
+        }
+        holding = true;
+    } else {
+        holding = false;
     }
     const uint64_t next = extendPublished(high, low, now);
 
@@ -139,6 +174,9 @@ void Time::resetMonotonicForTests()
     }
     writerActive.store(false, std::memory_order_relaxed);
     monotonicPublishHook.store(nullptr, std::memory_order_relaxed);
+    testGlitchArmed.store(false, std::memory_order_relaxed);
+    holding = false;
+    heldSinceLog = 0;
 }
 
 void Time::setMonotonicPublishHookForTests(MonotonicPublishHook hook)

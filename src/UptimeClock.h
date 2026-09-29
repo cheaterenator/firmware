@@ -15,6 +15,9 @@ namespace Time
 // test_uptime_clock/ do exactly that.
 inline std::atomic<uint32_t> testNowMs{0};
 inline std::atomic<bool> useTestClock{false};
+// One-shot glitch: the next getMillis() returns testGlitchMs instead of the test clock, once.
+inline std::atomic<uint32_t> testGlitchMs{0};
+inline std::atomic<bool> testGlitchArmed{false};
 using MonotonicPublishHook = void (*)();
 
 inline void setTestMillis(uint32_t ms)
@@ -27,11 +30,20 @@ inline void advanceTestMillis(uint32_t deltaMs)
     testNowMs.fetch_add(deltaMs, std::memory_order_relaxed);
     useTestClock.store(true, std::memory_order_relaxed);
 }
+// Make the next getMillis() read return ms, as a single glitched hardware read would; later reads
+// see the test clock again.
+inline void glitchNextTestMillis(uint32_t ms)
+{
+    testGlitchMs.store(ms, std::memory_order_relaxed);
+    testGlitchArmed.store(true, std::memory_order_relaxed);
+    useTestClock.store(true, std::memory_order_relaxed);
+}
 // Restore real-clock behaviour (call in test tearDown if a suite mixes real and fake time).
 inline void useRealClock()
 {
     useTestClock.store(false, std::memory_order_relaxed);
     testNowMs.store(0, std::memory_order_relaxed);
+    testGlitchArmed.store(false, std::memory_order_relaxed);
 }
 // Zero the published wrap carry. Suites that assert absolute uptime values call this in setUp():
 // a previous case that moved the test clock backwards left a counted wrap behind.
