@@ -1563,6 +1563,59 @@ void Router::deliverLocal(meshtastic_MeshPacket *p, RxSource src)
 #endif
 }
 
+#if USERPREFS_UPLINK_REPEAT_PACKETS && !MESHTASTIC_EXCLUDE_MQTT
+// (from, id) of the last packets dispatchReceived() handed to MQTT. Only their rebroadcasts are uplinked, so a repeat
+// never publishes a packet whose first copy a dispatch gate kept off MQTT (pre-hop drop, CORE_PORTNUMS_ONLY, ...).
+static constexpr size_t kUplinkedPacketsTracked = 16;
+static struct {
+    NodeNum from;
+    PacketId id;
+} uplinkedPackets[kUplinkedPacketsTracked];
+static size_t uplinkedPacketsNext = 0;
+
+static void rememberUplinkedPacket(const meshtastic_MeshPacket *p)
+{
+    uplinkedPackets[uplinkedPacketsNext] = {p->from, p->id};
+    uplinkedPacketsNext = (uplinkedPacketsNext + 1) % kUplinkedPacketsTracked;
+}
+
+static bool wasPacketUplinked(const meshtastic_MeshPacket *p)
+{
+    for (const auto &entry : uplinkedPackets) {
+        if (entry.from == p->from && entry.id == p->id)
+            return true;
+    }
+    return false;
+}
+
+/**
+ * Publish a LoRa rebroadcast of an already uplinked packet, so the broker sees every relayed copy with its own
+ * relay_node, hop_limit, RSSI and SNR. The copy is neither handled by modules nor relayed again: shouldFilterReceived()
+ * has already dropped it. Call before clearRoutingAuthCache() so the auth gate's decode of this copy is reused.
+ */
+static void uplinkRepeatedPacket(const meshtastic_MeshPacket *p)
+{
+    if (!moduleConfig.mqtt.enabled || !mqtt || isFromUs(p) ||
+        p->transport_mechanism != meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA || !wasPacketUplinked(p))
+        return;
+
+    meshtastic_MeshPacket *p_encrypted = packetPool.allocCopy(*p);
+    meshtastic_MeshPacket *p_decoded = packetPool.allocCopy(*p);
+    if (p_encrypted && p_decoded) {
+        applyRoutingAuthCache(p_decoded);
+        const RxTimeStamp rxStamp = computeRxTimeStamp();
+        p_encrypted->rx_time = p_decoded->rx_time = rxStamp.time;
+        p_encrypted->has_rx_time = p_decoded->has_rx_time = rxStamp.valid;
+        if (perhapsDecode(p_decoded) == DecodeState::DECODE_SUCCESS) {
+            LOG_DEBUG("Uplink repeat of 0x%08x from 0x%08x via relay 0x%02x", p->id, p->from, p->relay_node);
+            mqtt->onSend(*p_encrypted, *p_decoded, p_decoded->channel);
+        }
+    }
+    packetPool.release(p_encrypted);
+    packetPool.release(p_decoded);
+}
+#endif
+
 /**
  * Handle any packet that is received by an interface on this node.
  * Note: some packets may merely being passed through this node and will be forwarded elsewhere.
@@ -1769,6 +1822,9 @@ void Router::dispatchReceived(meshtastic_MeshPacket *p, RxSource src)
                         LOG_WARN("Alloc encrypted TR packet failed, send original TR to MQTT");
                     }
                 }
+#if USERPREFS_UPLINK_REPEAT_PACKETS
+                rememberUplinkedPacket(p);
+#endif
                 mqtt->onSend(*p_encrypted, *p, p->channel);
             }
         }
@@ -1941,6 +1997,9 @@ void Router::perhapsHandleReceived(meshtastic_MeshPacket *p)
     }
 
     if (shouldFilterReceived(p)) {
+#if USERPREFS_UPLINK_REPEAT_PACKETS && !MESHTASTIC_EXCLUDE_MQTT
+        uplinkRepeatedPacket(p);
+#endif
         clearRoutingAuthCache();
         LOG_DEBUG("Incoming msg filtered from 0x%08x", p->from);
         packetPool.release(p);

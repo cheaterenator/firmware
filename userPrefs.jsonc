@@ -89,6 +89,7 @@
   // "USERPREFS_MQTT_TLS_ENABLED": "false",
   // "USERPREFS_MQTT_ROOT_TOPIC": "event/REPLACEME",
   // "USERPREFS_TRANSGRESS_OK_TO_MQTT": "true", // Uplink other nodes' packets even without their OK to MQTT flag (never on the default server)
+  // "USERPREFS_UPLINK_REPEAT_PACKETS": "true", // Also uplink each LoRa rebroadcast of an uplinked packet (not handled or relayed again)
   // "USERPREFS_MESH_BEACON_LISTEN_ENABLED": "true", // Accept incoming beacons (default: on)
   //   "USERPREFS_MESH_BEACON_BROADCAST_ENABLED": "true",           // Periodically broadcast beacons from this node
   //   "USERPREFS_MESH_BEACON_MESSAGE": "Join us on NarrowSlow!!!", // Text payload included in every beacon broadcast
