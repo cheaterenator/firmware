@@ -216,6 +216,13 @@ bool RF95Interface::reinitChip()
     return res == RADIOLIB_ERR_NONE;
 }
 
+void RF95Interface::logChipProbe()
+{
+    // A live SX127x reads VERSION=0x12; 0x00/0xFF means nothing drives MISO
+    LOG_ERROR("RF95 probe VERSION=0x%x OP_MODE=0x%x", module.SPIreadRegister(RADIOLIB_SX127X_REG_VERSION),
+              module.SPIreadRegister(RADIOLIB_SX127X_REG_OP_MODE));
+}
+
 void RF95Interface::clearRadioIsr()
 {
     lora->clearDio0Action();

@@ -18,6 +18,19 @@
 #include "meshUtils.h"
 #endif
 
+#if defined(ARCH_ESP32) && ESP_ARDUINO_VERSION_MAJOR >= 3
+#define RADIO_SPI_BUS_DIAG 1
+#include "esp32-hal-periman.h"
+#include "esp32-hal-spi.h"
+#ifdef HW_SPI1_DEVICE
+#define RADIO_SPI_BUS SPI1
+#else
+#define RADIO_SPI_BUS SPI
+#endif
+#else
+#define RADIO_SPI_BUS_DIAG 0
+#endif
+
 void LockingArduinoHal::spiBeginTransaction()
 {
     spiLock->lock();
@@ -760,6 +773,39 @@ void RadioLibInterface::periodicRadioMaintenance()
     resetAGC();
 }
 
+#if RADIO_SPI_BUS_DIAG
+static const char *pinOwner(int pin)
+{
+    return (pin >= 0 && pin < SOC_GPIO_PIN_COUNT) ? perimanGetTypeName(perimanGetPinBusType(pin)) : "n/a";
+}
+
+static bool pinOwnedBy(int pin, peripheral_bus_type_t type)
+{
+    return pin >= 0 && pin < SOC_GPIO_PIN_COUNT && perimanGetPinBusType(pin) == type;
+}
+
+/// Logs which peripheral holds each radio pin; false when the SPI bus is stopped or lost SCK/MISO/MOSI to another one.
+static bool logRadioBusState(const Module &module)
+{
+    const int rst = (int)module.getRst(), irq = (int)module.getIrq(), busy = (int)module.getGpio();
+    const uint32_t clockDiv = spiGetClockDiv(RADIO_SPI_BUS.bus());
+    LOG_ERROR("Radio pins SCK=%d:%s MISO=%d:%s MOSI=%d:%s CS=%d:%s RST=%d:%s IRQ=%d:%s BUSY=%d:%s, SPI clkdiv=0x%x", LORA_SCK,
+              pinOwner(LORA_SCK), LORA_MISO, pinOwner(LORA_MISO), LORA_MOSI, pinOwner(LORA_MOSI), LORA_CS, pinOwner(LORA_CS), rst,
+              pinOwner(rst), irq, pinOwner(irq), busy, pinOwner(busy), clockDiv);
+    return clockDiv != 0 && pinOwnedBy(LORA_SCK, ESP32_BUS_TYPE_SPI_MASTER_SCK) &&
+           pinOwnedBy(LORA_MISO, ESP32_BUS_TYPE_SPI_MASTER_MISO) && pinOwnedBy(LORA_MOSI, ESP32_BUS_TYPE_SPI_MASTER_MOSI);
+}
+
+/// Re-runs main.cpp's boot-time bus setup, which RadioLib's begin() never repeats (the HAL doesn't own the bus)
+static void restartRadioSpiBus()
+{
+    concurrency::LockGuard g(spiLock);
+    RADIO_SPI_BUS.end(); // begin() is a no-op while the bus is up
+    RADIO_SPI_BUS.begin(LORA_SCK, LORA_MISO, LORA_MOSI, -1); // RadioLib drives CS as a GPIO
+    RADIO_SPI_BUS.setFrequency(4000000);
+}
+#endif
+
 bool RadioLibInterface::maybeRecoverChipStateLoss()
 {
     // One attempt per window: the transient resets this recovers from need a single re-init, and a
@@ -783,7 +829,24 @@ bool RadioLibInterface::maybeRecoverChipStateLoss()
     lastChipRecoveryMs = Time::skipZero(Time::getMillis());
     RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_INVALID_RADIO_SETTING);
     LOG_ERROR("Radio chip state lost mid-operation, re-init");
+#if RADIO_SPI_BUS_DIAG
+    // Before begin(): it re-claims CS/RST/IRQ as GPIOs and would hide who had taken them
+    const bool busIntact = logRadioBusState(module);
+    if (!busIntact) {
+        LOG_ERROR("Radio SPI bus lost its pins or clock, restart bus");
+        restartRadioSpiBus();
+    }
+#endif
+    logChipProbe();
     bool recovered = recoverChipStateLoss();
+#if RADIO_SPI_BUS_DIAG
+    if (!recovered && busIntact) {
+        // begin() already pulsed RST, so only a bus restart can still tell ESP32-side state from a dead chip
+        restartRadioSpiBus();
+        recovered = recoverChipStateLoss();
+        LOG_WARN("Radio %s after SPI bus restart", recovered ? "revived" : "still dead");
+    }
+#endif
     LOG_INFO("Radio re-init %s", recovered ? "succeeded" : "failed");
     return recovered;
 }

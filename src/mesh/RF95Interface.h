@@ -90,5 +90,7 @@ class RF95Interface : public RadioLibInterface
 
     /** Recover a chip that lost its runtime state: hardware-reset via begin() and reprogram */
     bool recoverChipStateLoss() override { return reinitChip() && programModemParams() == RADIOLIB_ERR_NONE; }
+
+    void logChipProbe() override;
 };
 #endif

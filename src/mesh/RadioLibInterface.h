@@ -199,6 +199,9 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
     /** Chip-specific recovery of a chip that lost its state to a reset/brownout. Returns true if reprogrammed. */
     virtual bool recoverChipStateLoss() { return false; }
 
+    /** Logs the chip's raw ID/mode registers, so a recovery log shows what the chip still answers over SPI */
+    virtual void logChipProbe() {}
+
     /** Throttled recoverChipStateLoss(), so a dead chip can't stall the RX/TX hot paths with repeated begin(). */
     bool maybeRecoverChipStateLoss();
 
