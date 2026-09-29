@@ -5,11 +5,19 @@
 #include "ServerAPI.h"
 #include "Throttle.h"
 #include "concurrency/LockGuard.h"
+#include "memGet.h"
 #include <Arduino.h>
 #include <cstdlib>
 #include <new>
 
 static constexpr uint32_t TCP_IDLE_TIMEOUT_MS = 15 * 60 * 1000UL;
+
+#ifdef ARCH_ESP32
+// lwIP and the Wi-Fi driver buffer from this heap too; a session that starves them leaves Wi-Fi deaf until TCP gives up.
+#ifndef API_CONNECTION_HEAP_HEADROOM
+#define API_CONNECTION_HEAP_HEADROOM (16 * 1024)
+#endif
+#endif
 
 template <typename T>
 ServerAPI<T>::ServerAPI(T &_client) : StreamAPI(&client), concurrency::OSThread("ServerAPI"), client(_client)
@@ -139,6 +147,16 @@ template <class T, class U> int32_t APIServerPort<T, U>::runOnce()
             LOG_INFO("Force close previous TCP connection");
             openAPI.reset();
         }
+
+#ifdef ARCH_ESP32
+        const uint32_t freeHeap = memGet.getFreeHeap();
+        if (freeHeap < sizeof(T) + API_CONNECTION_HEAP_HEADROOM) {
+            LOG_WARN("Low heap for API connection (%u free, %u needed), dropping client", (unsigned)freeHeap,
+                     (unsigned)(sizeof(T) + API_CONNECTION_HEAP_HEADROOM));
+            client.stop();
+            return 100;
+        }
+#endif
 
         // A ServerAPI carries the stream rx/tx buffers plus the FromRadio/ToRadio scratch, several
         // KB in one block. On ESP32 a new that cannot get that block is a reboot (see the note on
