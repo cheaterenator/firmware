@@ -766,6 +766,11 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
     if (mp_decoded.which_payload_variant == meshtastic_MeshPacket_decoded_tag) {
         // For uplinking other's packets, check if it's not OK to MQTT or if it's an older packet without the bitfield
         bool dontUplink = !mp_decoded.decoded.has_bitfield || !(mp_decoded.decoded.bitfield & BITFIELD_OK_TO_MQTT_MASK);
+#if USERPREFS_TRANSGRESS_OK_TO_MQTT
+        // Disregard the sender's OK_TO_MQTT flag, except on the default server
+        if (!isConfiguredForDefaultServer)
+            dontUplink = false;
+#endif
         // Respect the DontMqttMeBro flag for other nodes' packets on public MQTT servers
         if (!isFromUs(&mp_decoded) && !isMqttServerAddressPrivate && dontUplink) {
             LOG_INFO("MQTT onSend - drop packet: DontMqttMeBro flag");
