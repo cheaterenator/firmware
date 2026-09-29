@@ -51,7 +51,10 @@ the new node can build its node db)
 
 MeshService *service;
 
+// Static RAM whether or not MQTT runs; only proxy_to_client allocates from it.
+#ifndef MAX_MQTT_PROXY_MESSAGES
 #define MAX_MQTT_PROXY_MESSAGES 16
+#endif
 static MemoryPool<meshtastic_MqttClientProxyMessage, MAX_MQTT_PROXY_MESSAGES> staticMqttClientProxyMessagePool;
 
 #define MAX_QUEUE_STATUS 4
