@@ -33,6 +33,19 @@ void RedirectablePrint::setDestination(Print *_dest)
     dest = _dest;
 }
 
+void RedirectablePrint::setLogRecordSink(LogRecordSink *sink)
+{
+#ifdef HAS_FREE_RTOS
+    // Swapping under the log mutex waits out any other task still writing into the old sink.
+    if (inDebugPrint != nullptr && xSemaphoreTake(inDebugPrint, portMAX_DELAY) == pdTRUE) {
+        logRecordSink = sink;
+        xSemaphoreGive(inDebugPrint);
+        return;
+    }
+#endif
+    logRecordSink = sink;
+}
+
 size_t RedirectablePrint::write(uint8_t c)
 {
     // Always send the characters to our segger JTAG debugger
@@ -261,6 +274,14 @@ void RedirectablePrint::log_to_ble(const char *logLevel, const char *format, va_
 #endif
 }
 
+void RedirectablePrint::log_to_sink(const char *logLevel, const char *format, va_list arg)
+{
+    if (logRecordSink && config.security.debug_log_api_enabled && !pauseBluetoothLogging) {
+        auto thread = concurrency::OSThread::currentThread;
+        logRecordSink->onLogRecord(getLogLevel(logLevel), thread ? thread->ThreadName.c_str() : "", format, arg);
+    }
+}
+
 meshtastic_LogRecord_Level RedirectablePrint::getLogLevel(const char *logLevel)
 {
     meshtastic_LogRecord_Level ll = meshtastic_LogRecord_Level_UNSET; // default to unset
@@ -347,7 +368,11 @@ void RedirectablePrint::log(const char *logLevel, const char *format, ...)
         log_to_syslog(logLevel, newFormat.get(), arg_copy);
         va_end(arg_copy);
 
-        log_to_ble(logLevel, newFormat.get(), arg);
+        va_copy(arg_copy, arg);
+        log_to_ble(logLevel, newFormat.get(), arg_copy);
+        va_end(arg_copy);
+
+        log_to_sink(logLevel, newFormat.get(), arg);
 
         va_end(arg);
 #ifdef HAS_FREE_RTOS

@@ -1,21 +1,37 @@
 #pragma once
 
+#include "RedirectablePrint.h"
 #include "StreamAPI.h"
+#include "mesh/LogRecordQueue.h"
 #include "mesh/StreamFrameWriter.h"
 #include <cstdlib>
 #include <memory>
 
 #define SERVER_API_DEFAULT_PORT 4403
 
+// Bytes of LogRecords queued for a TCP client while debug_log_api_enabled is set; 0 turns the stream off.
+// Off on portduino: its Lock is a no-op while more than one thread logs.
+#ifndef API_LOG_QUEUE_SIZE
+#ifdef ARCH_PORTDUINO
+#define API_LOG_QUEUE_SIZE 0
+#else
+#define API_LOG_QUEUE_SIZE 4096
+#endif
+#endif
+
 /**
- * Provides both debug printing and, if the client starts sending protobufs to us, switches to send/receive protobufs
- * (and starts dropping debug printing - FIXME, eventually those prints should be encapsulated in protobufs).
+ * Serves the protobuf API to one TCP client; with debug_log_api_enabled the debug log goes along as FromRadio.log_record.
  */
-template <class T> class ServerAPI : public StreamAPI, private concurrency::OSThread
+template <class T> class ServerAPI : public StreamAPI, public LogRecordSink, private concurrency::OSThread
 {
   private:
     T client;
     StreamFrameWriter frameWriter;
+    LogRecordQueue logQueue;
+    bool logQueueRefused = false;
+
+    /// Allocate or release the log queue to follow debug_log_api_enabled.
+    void updateLogQueue();
 
   public:
     explicit ServerAPI(T &_client);
@@ -27,6 +43,9 @@ template <class T> class ServerAPI : public StreamAPI, private concurrency::OSTh
 
     /// Check the current underlying physical link to see if the client is currently connected
     virtual bool checkIsConnected() override;
+
+    /// Queue one log line for this client; runs on whichever task logged it.
+    void onLogRecord(meshtastic_LogRecord_Level level, const char *source, const char *format, va_list arg) override;
 
   protected:
     /// We override this method to prevent publishing EVENT_SERIAL_CONNECTED/DISCONNECTED for wifi links (we want the board to
@@ -40,6 +59,8 @@ template <class T> class ServerAPI : public StreamAPI, private concurrency::OSTh
     virtual bool hasRetainedFrame() override;
     /// Return whether the dedicated log buffer can be safely overwritten.
     virtual bool canEncodeLogRecord() override;
+    /// Report whether a frame can go out now without the client's write() blocking.
+    virtual bool canWriteFrame(size_t frameLen) override;
 
     virtual int32_t runOnce() override; // Check for dropped client connections
 };

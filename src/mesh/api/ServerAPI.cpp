@@ -2,6 +2,7 @@
 // variant defines mesh-pb-constants.h needs (portduino resolves MAX_NUM_NODES at runtime).
 #include "configuration.h"
 
+#include "NodeDB.h"
 #include "ServerAPI.h"
 #include "Throttle.h"
 #include "concurrency/LockGuard.h"
@@ -9,6 +10,10 @@
 #include <Arduino.h>
 #include <cstdlib>
 #include <new>
+
+#ifdef ARCH_ESP32
+#include <sys/select.h>
+#endif
 
 static constexpr uint32_t TCP_IDLE_TIMEOUT_MS = 15 * 60 * 1000UL;
 
@@ -27,6 +32,9 @@ ServerAPI<T>::ServerAPI(T &_client) : StreamAPI(&client), concurrency::OSThread(
 
 template <typename T> ServerAPI<T>::~ServerAPI()
 {
+    // Detach from the log path before the queue and encode buffers it writes into go away.
+    if (logQueue.isActive())
+        console->setLogRecordSink(nullptr);
     client.stop();
 }
 
@@ -86,6 +94,71 @@ template <typename T> bool ServerAPI<T>::canEncodeLogRecord()
     return !hasRetainedFrame();
 }
 
+template <typename T> bool ServerAPI<T>::canWriteFrame(size_t frameLen)
+{
+#ifdef ARCH_ESP32
+    // NetworkClient reports no write space and its write() waits seconds on a full socket, so ask lwIP.
+    // lwIP calls a socket writable only with more than 2 MSS of send buffer free, room for any frame.
+    (void)frameLen;
+    const int fd = client.fd();
+    if (fd < 0)
+        return false;
+    fd_set writeSet;
+    FD_ZERO(&writeSet);
+    FD_SET(fd, &writeSet);
+    timeval noWait = {0, 0};
+    return select(fd + 1, nullptr, &writeSet, nullptr, &noWait) > 0;
+#else
+    return client.availableForWrite() >= (int)frameLen;
+#endif
+}
+
+/// Encode and queue one log line. Called inside RedirectablePrint::log(), whose mutex serializes callers,
+/// so nothing here may log or take streamLock.
+template <typename T>
+void ServerAPI<T>::onLogRecord(meshtastic_LogRecord_Level level, const char *source, const char *format, va_list arg)
+{
+    size_t len;
+    const uint8_t *payload = encodeLogRecord(level, source, format, arg, len);
+    if (len > 0)
+        logQueue.push(payload, len);
+}
+
+template <typename T> void ServerAPI<T>::updateLogQueue()
+{
+    if (API_LOG_QUEUE_SIZE == 0)
+        return;
+
+    const bool wanted = config.security.debug_log_api_enabled;
+    if (!wanted) {
+        logQueueRefused = false;
+        if (logQueue.isActive()) {
+            console->setLogRecordSink(nullptr);
+            logQueue.end();
+        }
+        return;
+    }
+    if (logQueue.isActive() || logQueueRefused)
+        return;
+
+#ifdef ARCH_ESP32
+    const uint32_t freeHeap = memGet.getFreeHeap();
+    if (freeHeap < API_LOG_QUEUE_SIZE + API_CONNECTION_HEAP_HEADROOM) {
+        LOG_WARN("Low heap for TCP debug log (%u free, %u needed), not sending it", (unsigned)freeHeap,
+                 (unsigned)(API_LOG_QUEUE_SIZE + API_CONNECTION_HEAP_HEADROOM));
+        logQueueRefused = true;
+        return;
+    }
+#endif
+    if (!logQueue.begin(API_LOG_QUEUE_SIZE)) {
+        LOG_WARN("No heap for TCP debug log queue (%u bytes), not sending it", (unsigned)API_LOG_QUEUE_SIZE);
+        logQueueRefused = true;
+        return;
+    }
+    console->setLogRecordSink(this);
+    LOG_INFO("Send debug log to TCP client (%u-byte queue)", (unsigned)API_LOG_QUEUE_SIZE);
+}
+
 template <class T> int32_t ServerAPI<T>::runOnce()
 {
     if (client.connected()) {
@@ -96,8 +169,17 @@ template <class T> int32_t ServerAPI<T>::runOnce()
             return 0;
         }
         int32_t delay = StreamAPI::runOncePart();
+
+        updateLogQueue();
+        drainLogRecords(logQueue);
+        // Report a gap only once the backlog clears, so a stalled client does not turn this into a log flood.
+        if (logQueue.isEmpty()) {
+            if (uint32_t dropped = logQueue.takeDropped())
+                LOG_WARN("TCP debug log dropped %u records", (unsigned)dropped);
+        }
+
         // Nothing wakes us when the socket frees transmit space.
-        return hasPendingOutput() && delay > 25 ? 25 : delay;
+        return (hasPendingOutput() || !logQueue.isEmpty()) && delay > 25 ? 25 : delay;
     } else {
         LOG_INFO("Client dropped connection, suspend API service");
         close();

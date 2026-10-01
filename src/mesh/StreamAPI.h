@@ -13,6 +13,8 @@
 // hardware watchdog (RP2350 arms 8s) resets mid-dump.
 #define STREAM_WRITE_BUDGET_MSEC 100
 
+class LogRecordQueue;
+
 /**
  * A version of our 'phone' API that talks over a Stream.  So therefore well suited to use with serial links
  * or TCP connections.
@@ -97,6 +99,13 @@ class StreamAPI : public PhoneAPI
 
     /// Low level function to emit a protobuf encapsulated log record
     void emitLogRecord(meshtastic_LogRecord_Level level, const char *src, const char *format, va_list arg);
+
+    /// Encode one FromRadio LogRecord into the dedicated log buffer; returns the payload and sets len.
+    const uint8_t *encodeLogRecord(meshtastic_LogRecord_Level level, const char *src, const char *format, va_list arg,
+                                   size_t &len);
+
+    /// Send queued LogRecords while the transport can take them without blocking.
+    void drainLogRecords(LogRecordQueue &queue);
 
     /// Return whether the transport can accept a frame of the requested size.
     virtual bool canWriteFrame(size_t frameLen) { return true; }

@@ -8,8 +8,7 @@
 #endif // HAS_ETHERNET
 
 /**
- * Provides both debug printing and, if the client starts sending protobufs to us, switches to send/receive protobufs
- * (and starts dropping debug printing - FIXME, eventually those prints should be encapsulated in protobufs).
+ * Serves the protobuf API to one Wi-Fi (or ESP32 Ethernet) TCP client.
  */
 class WiFiServerAPI : public ServerAPI<WiFiClient>
 {

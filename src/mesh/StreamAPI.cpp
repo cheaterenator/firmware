@@ -2,6 +2,7 @@
 // variant defines mesh-pb-constants.h needs (portduino resolves MAX_NUM_NODES at runtime).
 #include "configuration.h"
 
+#include "LogRecordQueue.h"
 #include "PowerFSM.h"
 #include "StreamAPI.h"
 #include "Throttle.h"
@@ -254,6 +255,15 @@ void StreamAPI::emitLogRecord(meshtastic_LogRecord_Level level, const char *src,
     if (!canEncodeLogRecord())
         return;
 
+    size_t len;
+    encodeLogRecord(level, src, format, arg, len);
+    writeFrame(txBufLog, len, true);
+}
+
+/// Encode one FromRadio LogRecord into txBufLog; returns the payload and sets len.
+const uint8_t *StreamAPI::encodeLogRecord(meshtastic_LogRecord_Level level, const char *src, const char *format, va_list arg,
+                                          size_t &len)
+{
     // IMPORTANT: do NOT touch `fromRadioScratch` or `txBuf` here - those
     // belong to the main packet-emission path and a LOG_ firing during
     // `writeStream()` would corrupt an in-flight encode. We keep a
@@ -268,15 +278,29 @@ void StreamAPI::emitLogRecord(meshtastic_LogRecord_Level level, const char *src,
     fromRadioScratchLog.log_record.time = rtc_sec;
     strncpy(fromRadioScratchLog.log_record.source, src, sizeof(fromRadioScratchLog.log_record.source) - 1);
 
-    auto num_printed =
-        vsnprintf(fromRadioScratchLog.log_record.message, sizeof(fromRadioScratchLog.log_record.message) - 1, format, arg);
-    if (num_printed > 0 && fromRadioScratchLog.log_record.message[num_printed - 1] ==
-                               '\n') // Strip any ending newline, because we have records for framing instead.
-        fromRadioScratchLog.log_record.message[num_printed - 1] = '\0';
+    char *message = fromRadioScratchLog.log_record.message;
+    vsnprintf(message, sizeof(fromRadioScratchLog.log_record.message) - 1, format, arg);
+    // Strip any ending newline, because we have records for framing instead. strlen, not vsnprintf's
+    // return: that is the untruncated length and indexes past the buffer for a long line.
+    size_t messageLen = strlen(message);
+    if (messageLen > 0 && message[messageLen - 1] == '\n')
+        message[messageLen - 1] = '\0';
 
-    size_t len =
-        pb_encode_to_bytes(txBufLog + HEADER_LEN, meshtastic_FromRadio_size, &meshtastic_FromRadio_msg, &fromRadioScratchLog);
-    writeFrame(txBufLog, len, true);
+    len = pb_encode_to_bytes(txBufLog + HEADER_LEN, meshtastic_FromRadio_size, &meshtastic_FromRadio_msg, &fromRadioScratchLog);
+    return txBufLog + HEADER_LEN;
+}
+
+/// Send queued LogRecords through txBuf, stopping at backpressure or the write budget.
+void StreamAPI::drainLogRecords(LogRecordQueue &queue)
+{
+    const uint32_t started = millis();
+    // finishPendingFrame() first: a retained tail may still point into txBuf.
+    while (canWrite && !queue.isEmpty() && finishPendingFrame() && canWriteFrame(MAX_STREAM_BUF_SIZE) &&
+           Throttle::isWithinTimespanMs(started, STREAM_WRITE_BUDGET_MSEC)) {
+        size_t len = queue.pop(txBuf + HEADER_LEN, MAX_TO_FROM_RADIO_SIZE);
+        if (len == 0 || !emitTxBuffer(len))
+            break;
+    }
 }
 
 /// Hookable to find out when connection changes

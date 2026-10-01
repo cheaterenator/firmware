@@ -6,6 +6,16 @@
 #include <stdarg.h>
 #include <string>
 
+/// Receives the log lines that debug_log_api_enabled routes to a client link, on whichever task logged them.
+class LogRecordSink
+{
+  public:
+    virtual void onLogRecord(meshtastic_LogRecord_Level level, const char *source, const char *format, va_list arg) = 0;
+
+  protected:
+    ~LogRecordSink() = default;
+};
+
 /**
  * A Printable that can be switched to squirt its bytes to a different sink.
  * This class is mostly useful to allow debug printing to be redirected away from Serial
@@ -29,6 +39,9 @@ class RedirectablePrint : public Print
      */
     void rpInit();
     void setDestination(Print *dest);
+
+    /// Also send log lines to sink (nullptr stops it); returns once no log call is still inside the old one.
+    void setLogRecordSink(LogRecordSink *sink);
 
     virtual size_t write(uint8_t c);
 
@@ -55,6 +68,9 @@ class RedirectablePrint : public Print
     meshtastic_LogRecord_Level getLogLevel(const char *logLevel);
 
   private:
+    LogRecordSink *logRecordSink = nullptr;
+
     void log_to_syslog(const char *logLevel, const char *format, va_list arg);
     void log_to_ble(const char *logLevel, const char *format, va_list arg);
+    void log_to_sink(const char *logLevel, const char *format, va_list arg);
 };
