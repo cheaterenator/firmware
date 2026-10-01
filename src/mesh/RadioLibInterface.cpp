@@ -876,12 +876,12 @@ static void formatPad(char *buf, size_t len, const gpio_io_config_t &c)
              (unsigned)c.sig_out, c.ie, c.oe, c.oe_ctrl_by_periph, c.oe_inv, c.od, c.pu, c.pd, (int)c.drv, c.slp_sel);
 }
 
-/// Logs every pad, matrix route and SPI register that no longer matches the boot baseline
-static void logRadioBusDiff()
+/// Logs every pad, matrix route and SPI register that no longer matches the boot baseline; true if any differ
+static bool logRadioBusDiff()
 {
     if (!busBaselineTaken) {
         LOG_WARN("Radio bus: no baseline to compare against");
-        return;
+        return false;
     }
     RadioBusSnapshot now{};
     captureRadioBus(now);
@@ -909,6 +909,7 @@ static void logRadioBusDiff()
 #endif
     if (!diffs)
         LOG_ERROR("Radio bus pads, matrix routing and SPI regs all match the baseline (SPI host %d)", busHost);
+    return diffs != 0;
 }
 #endif
 
@@ -937,21 +938,33 @@ bool RadioLibInterface::maybeRecoverChipStateLoss()
 #if RADIO_SPI_BUS_DIAG
     // Before begin(): it re-claims CS/RST/IRQ as GPIOs and would hide who had taken them
     const bool busIntact = logRadioBusState(module);
-    logRadioBusDiff();
+    const bool busDrifted = logRadioBusDiff();
+    bool busRestarted = false;
     if (!busIntact) {
         LOG_ERROR("Radio SPI bus lost its pins or clock, restart bus");
         restartRadioSpiBus();
+        busRestarted = true;
     }
 #endif
-    logChipProbe();
+    logChipProbe(); // still on the bus as found, unless a stopped clock would have hung it
+#if RADIO_SPI_BUS_DIAG
+    if (busDrifted && !busRestarted) {
+        // A drifted bus can't reach the chip, so begin() would only burn its reset retries first
+        LOG_ERROR("Radio SPI bus config drifted, restart bus");
+        restartRadioSpiBus();
+        busRestarted = true;
+    }
+#endif
     bool recovered = recoverChipStateLoss();
 #if RADIO_SPI_BUS_DIAG
-    if (!recovered && busIntact) {
+    if (!recovered && !busRestarted) {
         // begin() already pulsed RST, so only a bus restart can still tell ESP32-side state from a dead chip
         restartRadioSpiBus();
+        busRestarted = true;
         recovered = recoverChipStateLoss();
-        LOG_WARN("Radio %s after SPI bus restart", recovered ? "revived" : "still dead");
     }
+    if (busRestarted)
+        LOG_WARN("Radio %s after SPI bus restart", recovered ? "revived" : "still dead");
 #endif
     LOG_INFO("Radio re-init %s", recovered ? "succeeded" : "failed");
     // error_code latches until reboot and pins the fault screen, so a glitch fixed in place stays in the log only
