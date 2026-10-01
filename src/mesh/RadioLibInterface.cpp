@@ -22,11 +22,14 @@
 #define RADIO_SPI_BUS_DIAG 1
 #include "esp32-hal-periman.h"
 #include "esp32-hal-spi.h"
+#include "hal/gpio_ll.h"
+#include "soc/spi_periph.h"
 #ifdef HW_SPI1_DEVICE
 #define RADIO_SPI_BUS SPI1
 #else
 #define RADIO_SPI_BUS SPI
 #endif
+static void captureRadioBusBaseline();
 #else
 #define RADIO_SPI_BUS_DIAG 0
 #endif
@@ -739,6 +742,9 @@ void RadioLibInterface::startReceive()
     // This is the sole place the recovery ladder is cleared - nothing short of an armed RX counts as fixed.
     rxOffline = false;
     chipRecoveryFailures = 0;
+#if RADIO_SPI_BUS_DIAG
+    captureRadioBusBaseline();
+#endif
     powerMon->setState(meshtastic_PowerMon_State_Lora_RXOn);
 }
 
@@ -804,6 +810,106 @@ static void restartRadioSpiBus()
     RADIO_SPI_BUS.begin(LORA_SCK, LORA_MISO, LORA_MOSI, -1); // RadioLib drives CS as a GPIO
     RADIO_SPI_BUS.setFrequency(4000000);
 }
+
+static const int busPins[] = {LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS};
+static const char *const busPinNames[] = {"SCK", "MISO", "MOSI", "CS"};
+constexpr size_t BUS_PIN_COUNT = sizeof(busPins) / sizeof(busPins[0]);
+
+/// What SPI.end()+begin() re-programs: pad config, GPIO matrix routing and (ESP32) the SPI controller setup
+struct RadioBusSnapshot {
+    gpio_io_config_t pads[BUS_PIN_COUNT];
+    int misoInPin; // GPIO the controller's MISO input is routed from, -1 when it bypasses the matrix
+#if CONFIG_IDF_TARGET_ESP32
+    uint32_t spiRegs[5];
+#endif
+};
+#if CONFIG_IDF_TARGET_ESP32
+static const char *const spiRegNames[] = {"ctrl", "ctrl2", "clock", "user", "pin"};
+#endif
+
+static RadioBusSnapshot busBaseline;
+static bool busBaselineTaken = false;
+static int busHost = -1; // spi_periph_signal[] index of the radio's controller
+
+static void captureRadioBus(RadioBusSnapshot &s)
+{
+    for (size_t i = 0; i < BUS_PIN_COUNT; i++) {
+        if (busPins[i] >= 0 && busPins[i] < SOC_GPIO_PIN_COUNT)
+            gpio_ll_get_io_config(&GPIO, busPins[i], &s.pads[i]);
+    }
+    s.misoInPin = busHost >= 0 ? gpio_ll_get_in_signal_connected_io(&GPIO, spi_periph_signal[busHost].spiq_in) : -1;
+#if CONFIG_IDF_TARGET_ESP32
+    if (busHost >= 0) {
+        const spi_dev_t *hw = spi_periph_signal[busHost].hw;
+        const uint32_t regs[] = {hw->ctrl.val, hw->ctrl2.val, hw->clock.val, hw->user.val, hw->pin.val};
+        memcpy(s.spiRegs, regs, sizeof(regs));
+    }
+#endif
+}
+
+/// Snapshot of a known-good bus, taken the first time RX is armed; later failures are diffed against it
+static void captureRadioBusBaseline()
+{
+    if (busBaselineTaken)
+        return;
+    busBaselineTaken = true;
+    captureRadioBus(busBaseline);
+    // The controller is whichever one drives SCK, so no Arduino-bus-number to IDF-host mapping is needed
+    for (int h = 0; h < SOC_SPI_PERIPH_NUM; h++) {
+        if (spi_periph_signal[h].spiclk_out == busBaseline.pads[0].sig_out)
+            busHost = h;
+    }
+    captureRadioBus(busBaseline); // again, now that the host's MISO signal and registers are known
+    LOG_DEBUG("Radio bus baseline taken, SPI host %d, MISO from GPIO %d", busHost, busBaseline.misoInPin);
+}
+
+static bool padsEqual(const gpio_io_config_t &a, const gpio_io_config_t &b)
+{
+    return a.fun_sel == b.fun_sel && a.sig_out == b.sig_out && a.drv == b.drv && a.pu == b.pu && a.pd == b.pd && a.ie == b.ie &&
+           a.oe == b.oe && a.oe_ctrl_by_periph == b.oe_ctrl_by_periph && a.oe_inv == b.oe_inv && a.od == b.od &&
+           a.slp_sel == b.slp_sel;
+}
+
+static void formatPad(char *buf, size_t len, const gpio_io_config_t &c)
+{
+    snprintf(buf, len, "fun=%u sig=%u ie=%d oe=%d periphOE=%d oeInv=%d od=%d pu=%d pd=%d drv=%d slp=%d", (unsigned)c.fun_sel,
+             (unsigned)c.sig_out, c.ie, c.oe, c.oe_ctrl_by_periph, c.oe_inv, c.od, c.pu, c.pd, (int)c.drv, c.slp_sel);
+}
+
+/// Logs every pad, matrix route and SPI register that no longer matches the boot baseline
+static void logRadioBusDiff()
+{
+    if (!busBaselineTaken) {
+        LOG_WARN("Radio bus: no baseline to compare against");
+        return;
+    }
+    RadioBusSnapshot now{};
+    captureRadioBus(now);
+    unsigned diffs = 0;
+    for (size_t i = 0; i < BUS_PIN_COUNT; i++) {
+        if (busPins[i] < 0 || busPins[i] >= SOC_GPIO_PIN_COUNT || padsEqual(busBaseline.pads[i], now.pads[i]))
+            continue;
+        char was[96], is[96];
+        formatPad(was, sizeof(was), busBaseline.pads[i]);
+        formatPad(is, sizeof(is), now.pads[i]);
+        LOG_ERROR("Radio bus %s(%d) pad changed: %s -> %s", busPinNames[i], busPins[i], was, is);
+        diffs++;
+    }
+    if (now.misoInPin != busBaseline.misoInPin) {
+        LOG_ERROR("Radio bus MISO input now routed from GPIO %d, was %d", now.misoInPin, busBaseline.misoInPin);
+        diffs++;
+    }
+#if CONFIG_IDF_TARGET_ESP32
+    for (size_t i = 0; i < sizeof(now.spiRegs) / sizeof(now.spiRegs[0]); i++) {
+        if (now.spiRegs[i] == busBaseline.spiRegs[i])
+            continue;
+        LOG_ERROR("Radio bus SPI %s changed: 0x%x -> 0x%x", spiRegNames[i], busBaseline.spiRegs[i], now.spiRegs[i]);
+        diffs++;
+    }
+#endif
+    if (!diffs)
+        LOG_ERROR("Radio bus pads, matrix routing and SPI regs all match the baseline (SPI host %d)", busHost);
+}
 #endif
 
 bool RadioLibInterface::maybeRecoverChipStateLoss()
@@ -827,11 +933,11 @@ bool RadioLibInterface::maybeRecoverChipStateLoss()
     chipRecoveryFailures++;
 
     lastChipRecoveryMs = Time::skipZero(Time::getMillis());
-    RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_INVALID_RADIO_SETTING);
     LOG_ERROR("Radio chip state lost mid-operation, re-init");
 #if RADIO_SPI_BUS_DIAG
     // Before begin(): it re-claims CS/RST/IRQ as GPIOs and would hide who had taken them
     const bool busIntact = logRadioBusState(module);
+    logRadioBusDiff();
     if (!busIntact) {
         LOG_ERROR("Radio SPI bus lost its pins or clock, restart bus");
         restartRadioSpiBus();
@@ -848,6 +954,9 @@ bool RadioLibInterface::maybeRecoverChipStateLoss()
     }
 #endif
     LOG_INFO("Radio re-init %s", recovered ? "succeeded" : "failed");
+    // error_code latches until reboot and pins the fault screen, so a glitch fixed in place stays in the log only
+    if (!recovered)
+        RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_INVALID_RADIO_SETTING);
     return recovered;
 }
 
