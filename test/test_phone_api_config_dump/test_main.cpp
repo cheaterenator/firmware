@@ -80,13 +80,6 @@ class PhoneAPITestShim : public PhoneAPI
 /// Concrete Router with no radio interface: getQueueStatus() reports an all-zero queue.
 class TestRouter : public Router
 {
-  public:
-    // Router's ctor allocated the global cryptLock; nothing else frees it.
-    ~TestRouter()
-    {
-        delete cryptLock;
-        cryptLock = nullptr;
-    }
 };
 
 // Saved-global fixture, template test_event_channel_phone_api. Restored in tearDown() rather
@@ -635,7 +628,6 @@ void setUp(void)
     nodeDatabase.nodes.clear();
     nodeDB = testNodeDB = new NodeDB();
     configureTestChannels();
-    cryptLock = nullptr; // Router's ctor asserts this is unset before allocating its own.
     router = testRouter = new TestRouter();
     api = new PhoneAPITestShim();
     heartbeatReceived = false;
@@ -645,7 +637,7 @@ void tearDown(void)
 {
     delete api; // dtor runs close(), which still needs the mock service installed
     api = nullptr;
-    delete testRouter; // ~TestRouter() deletes the cryptLock its ctor allocated
+    delete testRouter;
     testRouter = nullptr;
     delete testNodeDB;
     testNodeDB = nullptr;
@@ -656,7 +648,7 @@ void tearDown(void)
     service = savedState->service;
     router = savedState->router;
     nodeDB = savedState->nodeDB;
-    cryptLock = savedState->cryptLock; // ~TestRouter() nulled it; hand the saved router its own back
+    cryptLock = savedState->cryptLock;
     myNodeInfo = savedState->myNodeInfo;
     channels = savedState->channels;
     channelFile = savedState->channelFile;
