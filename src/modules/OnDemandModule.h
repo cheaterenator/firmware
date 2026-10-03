@@ -36,7 +36,8 @@ class OnDemandModule : public ProtobufModule<meshtastic_OnDemand>, private concu
 
     meshtastic_OnDemand prepareNodeStats();
     void sendSegmentedNodeList(const meshtastic_MeshPacket &mp);
-    uint32_t sinceLastSeen(const meshtastic_NodeInfoLite *n);
+    int fillNodeListSegment(meshtastic_OnDemand &onDemand, int idx, uint32_t now);
+    uint32_t sinceLastSeen(const meshtastic_NodeInfoLite *n, uint32_t now);
     meshtastic_OnDemand preparePingResponse(const meshtastic_MeshPacket &mp);
     meshtastic_OnDemand preparePingResponseAck(const meshtastic_MeshPacket &mp);
     meshtastic_OnDemand preparePortCounterHistory();

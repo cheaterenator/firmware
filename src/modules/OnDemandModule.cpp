@@ -143,116 +143,105 @@ bool OnDemandModule::fitsInPacket(const meshtastic_OnDemand &onDemand, size_t ma
     return stream.bytes_written <= maxSize;
 }
 
-uint32_t OnDemandModule::sinceLastSeen(const meshtastic_NodeInfoLite *n)
+uint32_t OnDemandModule::sinceLastSeen(const meshtastic_NodeInfoLite *n, uint32_t now)
 {
-    uint32_t now = getTime();
     int32_t delta = (int32_t)(now - n->last_heard);
     return delta < 0 ? 0 : (uint32_t)delta;
 }
 
-// Two-pass, entirely stack-allocated: first pass only counts how many segments the response will need
-// (no sending, no allocation), second pass builds and sends each segment as it goes. No `new`/heap use
-// for the response itself - each meshtastic_OnDemand is a local reused across the loop, and
-// allocDataProtobuf()/sendPacketToRequester() go through the existing packetPool, same as any other
-// module's reply.
+// Fills node_list with the online nodes from nodeDB index `idx` on, until node_list is full or the next
+// entry would push the encoded response past MAX_PACKET_SIZE. Returns the index of the first node not
+// consumed. node_list_count is checked against the array capacity before each write: with more than
+// max_count nodes online, writing node_list[max_count] lands past the end of the meshtastic_OnDemand
+// local - on nRF52 straight onto the caller's saved registers and LR, a silent HardFault reset on return.
+int OnDemandModule::fillNodeListSegment(meshtastic_OnDemand &onDemand, int idx, uint32_t now)
+{
+    const int totalNodes = nodeDB->getNumMeshNodes();
+    const NodeNum ourNodeNum = nodeDB->getNodeNum();
+    auto &list = onDemand.variant.response.response_data.node_list;
+    const pb_size_t capacity = sizeof(list.node_list) / sizeof(list.node_list[0]);
+    list.node_list_count = 0;
+
+    while (idx < totalNodes && list.node_list_count < capacity) {
+        meshtastic_NodeInfoLite *node = nodeDB->getMeshNodeByIndex(idx);
+        // A node with an unknown hop count (e.g. only ever heard relayed through a channel we can't decode)
+        // is omitted rather than reported as hops=0, which would misrepresent a multi-hop node as a direct
+        // neighbor (and pair it with the SNR of whichever relay we actually heard).
+        if (!node || sinceLastSeen(node, now) >= NUM_ONLINE_SECS || node->num == ourNodeNum || !node->has_hops_away) {
+            idx++;
+            continue;
+        }
+
+        // memset, not `= meshtastic_NodeEntry_init_zero;` - see the comment in prepareNodeStats() for why an
+        // assignment (as opposed to a declaration initializer) from a macro with bare "" array-member
+        // literals is not portable across toolchains.
+        meshtastic_NodeEntry &entry = list.node_list[list.node_list_count];
+        memset(&entry, 0, sizeof(entry));
+        entry.node_id = node->num;
+        entry.last_heard = sinceLastSeen(node, now);
+        entry.hops = node->hops_away;
+        entry.snr = node->hops_away == 0 ? node->snr : 0;
+        // NodeInfoLite has no nested `user` (fields are flattened directly onto it).
+        strncpy(entry.long_name, node->long_name, sizeof(entry.long_name) - 1);
+        strncpy(entry.short_name, node->short_name, sizeof(entry.short_name) - 1);
+        list.node_list_count++;
+
+        if (!fitsInPacket(onDemand, MAX_PACKET_SIZE)) {
+            list.node_list_count--;
+            break;
+        }
+        idx++;
+    }
+    return idx;
+}
+
+// Two passes over one stack-allocated response: the first only counts the segments (packet_total), the
+// second rebuilds and sends each one. Both fill real entries through fillNodeListSegment() with the same
+// `now` and the same header size, so they split the list at the same nodes - a count made from blank
+// entries packs far more nodes per segment than the names allow, and the send pass then stops after that
+// many segments with the rest of the list unsent. allocDataProtobuf()/sendPacketToRequester() go through
+// the existing packetPool, same as any other module's reply.
 void OnDemandModule::sendSegmentedNodeList(const meshtastic_MeshPacket &mp)
 {
-    int totalNodes = nodeDB->getNumMeshNodes();
-    NodeNum ourNodeNum = nodeDB->getNodeNum();
+    const int totalNodes = nodeDB->getNumMeshNodes();
+    const uint32_t now = getTime();
 
+    meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
+    onDemand.which_variant = meshtastic_OnDemand_response_tag;
+    onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_NODES_ONLINE;
+    onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_node_list_tag;
+    onDemand.has_packet_index = true;
+    onDemand.has_packet_total = true;
+
+    // Segments are sized with packet_index/packet_total at their widest encoding (packet_total is a uint8_t
+    // on the wire, hence the cap), so the real values set before sending can only make a segment smaller.
     uint32_t totalPackets = 0;
-    {
-        int idx = 0;
-        while (idx < totalNodes) {
-            meshtastic_OnDemand probe = meshtastic_OnDemand_init_zero;
-            probe.which_variant = meshtastic_OnDemand_response_tag;
-            probe.variant.response.which_response_data = meshtastic_OnDemandResponse_node_list_tag;
-            auto &listRef = probe.variant.response.response_data.node_list;
-            listRef.node_list_count = 0;
-            bool addedAny = false;
-
-            while (idx < totalNodes) {
-                meshtastic_NodeInfoLite *node = nodeDB->getMeshNodeByIndex(idx);
-                // Skip nodes with an unknown hop count (e.g. only ever heard relayed through a channel we
-                // can't decode) - see the matching skip below for why: reporting them as hops=0 would show
-                // them as direct neighbors, with the SNR of whichever hop we last actually heard.
-                if (!node || sinceLastSeen(node) >= NUM_ONLINE_SECS || node->num == ourNodeNum || !node->has_hops_away) {
-                    idx++;
-                    continue;
-                }
-                // memset, not `= meshtastic_NodeEntry_init_zero;` - see the comment in prepareNodeStats()
-                // for why an assignment (as opposed to a declaration initializer) from a macro with bare
-                // "" array-member literals is not portable across toolchains.
-                memset(&listRef.node_list[listRef.node_list_count], 0, sizeof(listRef.node_list[listRef.node_list_count]));
-                listRef.node_list_count++;
-                addedAny = true;
-                if (!fitsInPacket(probe, MAX_PACKET_SIZE)) {
-                    listRef.node_list_count--;
-                    break;
-                }
-                idx++;
-            }
-            if (!addedAny)
-                break; // guard against an infinite loop
-            totalPackets++;
-        }
+    for (int idx = 0; idx < totalNodes && totalPackets < UINT8_MAX;) {
+        onDemand.packet_index = onDemand.packet_total = UINT8_MAX;
+        idx = fillNodeListSegment(onDemand, idx, now);
+        if (onDemand.variant.response.response_data.node_list.node_list_count == 0)
+            break; // no online node left
+        totalPackets++;
     }
 
     LOG_INFO("OnDemand: NodesList request - totalNodes=%d (from nodeDB), totalPackets=%u segments needed", totalNodes,
              totalPackets);
     if (totalPackets == 0) {
         // Either nodeDB has nothing but ourselves/stale entries (sinceLastSeen >= NUM_ONLINE_SECS), or
-        // totalNodes itself is 0 - either way, no segment is ever sent (see the while-loop guard
-        // below), so the requester sees no response at all rather than an empty list.
+        // totalNodes itself is 0 - either way, no segment is ever sent, so the requester sees no response at
+        // all rather than an empty list.
         LOG_WARN("OnDemand: NodesList has 0 online nodes to report - no response will be sent");
     }
 
-    int currentIndex = 0;
-    uint32_t packetIndex = 1;
-    while (currentIndex < totalNodes && packetIndex <= totalPackets) {
-        meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
-        onDemand.which_variant = meshtastic_OnDemand_response_tag;
-        onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_NODES_ONLINE;
-        onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_node_list_tag;
-        onDemand.has_packet_index = true;
-        onDemand.has_packet_total = true;
+    int idx = 0;
+    for (uint32_t packetIndex = 1; packetIndex <= totalPackets; packetIndex++) {
+        onDemand.packet_index = onDemand.packet_total = UINT8_MAX;
+        idx = fillNodeListSegment(onDemand, idx, now);
+        if (onDemand.variant.response.response_data.node_list.node_list_count == 0)
+            break;
         onDemand.packet_index = packetIndex;
         onDemand.packet_total = totalPackets;
-
-        auto &listRef = onDemand.variant.response.response_data.node_list;
-        listRef.node_list_count = 0;
-
-        while (currentIndex < totalNodes) {
-            meshtastic_NodeInfoLite *node = nodeDB->getMeshNodeByIndex(currentIndex);
-            // Keep in sync with the probe pass above: a node with an unknown hop count is omitted
-            // rather than reported as hops=0, which would misrepresent a multi-hop node as a direct
-            // neighbor (and pair it with the SNR of whichever relay we actually heard).
-            if (!node || sinceLastSeen(node) >= NUM_ONLINE_SECS || node->num == ourNodeNum || !node->has_hops_away) {
-                currentIndex++;
-                continue;
-            }
-
-            meshtastic_NodeEntry entry = meshtastic_NodeEntry_init_zero;
-            entry.node_id = node->num;
-            entry.last_heard = sinceLastSeen(node);
-            entry.hops = node->hops_away;
-            entry.snr = node->hops_away == 0 ? node->snr : 0;
-            // NodeInfoLite has no nested `user` (fields are flattened directly onto it).
-            strncpy(entry.long_name, node->long_name, sizeof(entry.long_name) - 1);
-            strncpy(entry.short_name, node->short_name, sizeof(entry.short_name) - 1);
-
-            listRef.node_list[listRef.node_list_count] = entry;
-            listRef.node_list_count++;
-
-            if (!fitsInPacket(onDemand, MAX_PACKET_SIZE)) {
-                listRef.node_list_count--;
-                break;
-            }
-            currentIndex++;
-        }
-
         sendPacketToRequester(onDemand, mp);
-        packetIndex++;
     }
 }
 
