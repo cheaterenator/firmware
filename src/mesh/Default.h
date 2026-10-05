@@ -14,7 +14,16 @@
 #define TEN_SECONDS_MS 10 * 1000
 #define MAX_INTERVAL INT32_MAX // FIXME: INT32_MAX to avoid overflow issues with Apple clients but should be UINT32_MAX
 
-#define min_default_telemetry_interval_secs (30 * 60)
+// Diagnostic builds only: USERPREFS_DIAG_MIN_BROADCAST_SECS lowers the telemetry and position
+// broadcast floors below to that value (it never raises one).
+#ifdef USERPREFS_DIAG_MIN_BROADCAST_SECS
+static_assert(USERPREFS_DIAG_MIN_BROADCAST_SECS >= 300, "USERPREFS_DIAG_MIN_BROADCAST_SECS must be at least 300");
+#define DIAG_BROADCAST_FLOOR(secs) ((secs) < USERPREFS_DIAG_MIN_BROADCAST_SECS ? (secs) : USERPREFS_DIAG_MIN_BROADCAST_SECS)
+#else
+#define DIAG_BROADCAST_FLOOR(secs) (secs)
+#endif
+
+#define min_default_telemetry_interval_secs DIAG_BROADCAST_FLOOR(30 * 60)
 #define default_gps_update_interval IF_ROUTER(ONE_DAY, 2 * 60)
 #define default_telemetry_broadcast_interval_secs IF_ROUTER(ONE_DAY / 2, 60 * 60)
 #define default_broadcast_interval_secs IF_ROUTER(ONE_DAY / 2, 60 * 60)
@@ -23,8 +32,8 @@
 // precision) or fixed_position: identical positions get deduped by traffic management anyway.
 // Held one hour above default_traffic_mgmt_position_min_interval_secs so this refresh clears
 // the receivers' dedup window instead of being dropped as a duplicate.
-#define default_position_stationary_broadcast_secs (6 * 60 * 60)
-#define min_default_broadcast_interval_secs IF_ROUTER(ONE_DAY / 2, 60 * 60)
+#define default_position_stationary_broadcast_secs DIAG_BROADCAST_FLOOR(6 * 60 * 60)
+#define min_default_broadcast_interval_secs DIAG_BROADCAST_FLOOR(IF_ROUTER(ONE_DAY / 2, 60 * 60))
 #define min_default_broadcast_smart_minimum_interval_secs 5 * 60
 #define default_wait_bluetooth_secs IF_ROUTER(1, 60)
 #define default_sds_secs IF_ROUTER(ONE_DAY, UINT32_MAX) // Default to forever super deep sleep

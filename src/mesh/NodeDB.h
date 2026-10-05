@@ -720,6 +720,8 @@ class NodeDB
     /// skip boot keygen and skip persisting defaults, so a transient read failure can't change our NodeNum
     /// or overwrite the on-disk config. Cleared at the top of every loadFromDisk() run.
     bool configDecodeFailed = false;
+    /// loadFromDisk() installed default config because none was usable (not the DECODE_FAILED path).
+    bool freshConfigInstalled = false;
     // Defer automatic writes until config load is healthy to protect device and node data from damaged configs.
     bool bootInitializationInProgress = true;
     bool configLoadComplete = false;
@@ -805,6 +807,10 @@ class NodeDB
     /// Reinit device state from scratch (not loading from disk)
     void installDefaultDeviceState(), installDefaultNodeDatabase(), installDefaultChannels(),
         installDefaultConfig(bool preserveKey), installDefaultModuleConfig();
+#ifdef USERPREFS_FIXED_GPS
+    /// Apply the userPrefs fixed position as a factory default; returns the SEGMENT_* bits it changed.
+    int installUserPrefsFixedPosition();
+#endif
 
     /// write to flash
     /// @return true if the save was successful

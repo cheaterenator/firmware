@@ -690,40 +690,9 @@ NodeDB::NodeDB()
         config.position.gps_enabled = 0;
     }
 #ifdef USERPREFS_FIXED_GPS
-    if (myNodeInfo.reboot_count == 1) { // Check if First boot ever or after Factory Reset.
-        meshtastic_Position fixedGPS = meshtastic_Position_init_default;
-#ifdef USERPREFS_FIXED_GPS_LAT
-        fixedGPS.latitude_i = (int32_t)(USERPREFS_FIXED_GPS_LAT * 1e7);
-        fixedGPS.has_latitude_i = true;
-#endif
-#ifdef USERPREFS_FIXED_GPS_LON
-        fixedGPS.longitude_i = (int32_t)(USERPREFS_FIXED_GPS_LON * 1e7);
-        fixedGPS.has_longitude_i = true;
-#endif
-#ifdef USERPREFS_FIXED_GPS_ALT
-        fixedGPS.altitude = USERPREFS_FIXED_GPS_ALT;
-        fixedGPS.has_altitude = true;
-#endif
-#if defined(USERPREFS_FIXED_GPS_LAT) && defined(USERPREFS_FIXED_GPS_LON)
-        fixedGPS.location_source = meshtastic_Position_LocSource_LOC_MANUAL;
-        config.has_position = true;
-#if !MESHTASTIC_EXCLUDE_POSITIONDB
-        {
-            concurrency::LockGuard guard(&satelliteMutex);
-            nodePositions[getNodeNum()] = TypeConversions::ConvertToPositionLite(fixedGPS);
-        }
-        // nodePositions is a member map, so the nodeDatabase CRC compare above cannot see this write -
-        // and it has already run. Flag the segment or the fixed position is only persisted by chance.
-        saveWhat |= SEGMENT_NODEDATABASE;
-#endif
-        setLocalPosition(fixedGPS);
-        config.position.fixed_position = true;
-        // Same for config, whose CRC compare also ran before this block. Keep that compare's
-        // degraded-boot guard so an unreadable config is never overwritten with UNSET defaults.
-        if (!configDecodeFailed)
-            saveWhat |= SEGMENT_CONFIG;
-#endif
-    }
+    // First boot ever, NVS erased, or a config installed fresh this boot (nRF52 has no reboot counter).
+    if (myNodeInfo.reboot_count == 1 || freshConfigInstalled)
+        saveWhat |= installUserPrefsFixedPosition();
 #endif
     sortMeshDB();
     // resetRadioConfig() above loaded config and channels, so this records the slot we booted on.
@@ -893,6 +862,46 @@ void NodeDB::refreshCommittedLoraSlot()
     committedSlot = currentLoraSlot().fingerprint();
 }
 
+#ifdef USERPREFS_FIXED_GPS
+int NodeDB::installUserPrefsFixedPosition()
+{
+    int changed = 0;
+    meshtastic_Position fixedGPS = meshtastic_Position_init_default;
+#ifdef USERPREFS_FIXED_GPS_LAT
+    fixedGPS.latitude_i = (int32_t)(USERPREFS_FIXED_GPS_LAT * 1e7);
+    fixedGPS.has_latitude_i = true;
+#endif
+#ifdef USERPREFS_FIXED_GPS_LON
+    fixedGPS.longitude_i = (int32_t)(USERPREFS_FIXED_GPS_LON * 1e7);
+    fixedGPS.has_longitude_i = true;
+#endif
+#ifdef USERPREFS_FIXED_GPS_ALT
+    fixedGPS.altitude = USERPREFS_FIXED_GPS_ALT;
+    fixedGPS.has_altitude = true;
+#endif
+#if defined(USERPREFS_FIXED_GPS_LAT) && defined(USERPREFS_FIXED_GPS_LON)
+    fixedGPS.location_source = meshtastic_Position_LocSource_LOC_MANUAL;
+    config.has_position = true;
+#if !MESHTASTIC_EXCLUDE_POSITIONDB
+    {
+        concurrency::LockGuard guard(&satelliteMutex);
+        nodePositions[getNodeNum()] = TypeConversions::ConvertToPositionLite(fixedGPS);
+    }
+    // nodePositions is a member map, so the boot nodeDatabase CRC compare cannot see this write -
+    // and it has already run. Flag the segment or the fixed position is only persisted by chance.
+    changed |= SEGMENT_NODEDATABASE;
+#endif
+    setLocalPosition(fixedGPS);
+    config.position.fixed_position = true;
+    // Same for config. Keep the boot compare's degraded-boot guard so an unreadable config is never
+    // overwritten with UNSET defaults.
+    if (!configDecodeFailed)
+        changed |= SEGMENT_CONFIG;
+#endif
+    return changed;
+}
+#endif
+
 bool NodeDB::factoryReset(bool eraseBleBonds)
 {
     LOG_INFO("Factory reset");
@@ -939,6 +948,11 @@ bool NodeDB::factoryReset(bool eraseBleBonds)
     installDefaultConfig(!eraseBleBonds); // Also preserve the private key if we're not erasing BLE bonds
     installDefaultModuleConfig();
     installDefaultChannels();
+#ifdef USERPREFS_FIXED_GPS
+    // Only a config reset keeps the key, and with it the NodeNum the position is stored under.
+    if (!eraseBleBonds)
+        installUserPrefsFixedPosition();
+#endif
     // third, write everything to disk
     saveToDisk();
     if (eraseBleBonds) {
@@ -1084,6 +1098,10 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
 
 #ifdef USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY
     config.lora.override_frequency = USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY;
+#endif
+
+#ifdef USERPREFS_LORACONFIG_FREQUENCY_OFFSET
+    config.lora.frequency_offset = USERPREFS_LORACONFIG_FREQUENCY_OFFSET;
 #endif
 
 #if USERPREFS_EVENT_MODE
@@ -1414,7 +1432,8 @@ void NodeDB::installDefaultModuleConfig()
     LOG_INFO("Install default ModuleConfig");
     memset(&moduleConfig, 0, sizeof(meshtastic_LocalModuleConfig));
 
-    moduleConfig.version = DEVICESTATE_CUR_VER;
+    // Fresh defaults are already opt-in; stamping the watermark keeps the 2.8 migration off the userPrefs below.
+    moduleConfig.version = POSITION_TELEMETRY_OPTIN_VER;
     moduleConfig.has_mqtt = true;
     moduleConfig.has_range_test = true;
     moduleConfig.has_serial = true;
@@ -1692,6 +1711,10 @@ void NodeDB::installDefaultModuleConfig()
 #undef BEACON_TARGET_REGION
 #undef BEACON_TARGET_CH_INDEX
 #endif // !MESHTASTIC_EXCLUDE_BEACON
+
+#ifdef USERPREFS_CONFIG_DEVICE_TELEM_ENABLED
+    moduleConfig.telemetry.device_telemetry_enabled = USERPREFS_CONFIG_DEVICE_TELEM_ENABLED;
+#endif
 
     initModuleConfigIntervals();
 }
@@ -2429,6 +2452,7 @@ void NodeDB::loadFromDisk()
 
     migrationSavePending = false;
     configDecodeFailed = false;
+    freshConfigInstalled = false;
     configLoadComplete = false;
 
 #if !USERPREFS_EVENT_MODE
@@ -2693,9 +2717,11 @@ void NodeDB::loadFromDisk()
         // No decodable config to work with: the file is absent (first boot) or could not be opened (OTHER_FAILURE
         // / NO_FILESYSTEM). Unlike DECODE_FAILED there are no usable contents to protect, so install defaults.
         installDefaultConfig();
+        freshConfigInstalled = true;
     } else if (config.version < DEVICESTATE_MIN_VER) {
         LOG_WARN("config %d is old, discard", config.version);
         installDefaultConfig(true);
+        freshConfigInstalled = true;
     } else {
         LOG_INFO("Loaded saved config v%d", config.version);
     }
@@ -2738,6 +2764,10 @@ void NodeDB::loadFromDisk()
 
 #ifdef USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY
     config.lora.override_frequency = USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY;
+#endif
+
+#ifdef USERPREFS_LORACONFIG_FREQUENCY_OFFSET
+    config.lora.frequency_offset = USERPREFS_LORACONFIG_FREQUENCY_OFFSET;
 #endif
 
 #if USERPREFS_EVENT_MODE

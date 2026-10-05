@@ -127,6 +127,9 @@ void Channels::initDefaultLoraConfig()
 #ifdef USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY
     loraConfig.override_frequency = USERPREFS_LORACONFIG_OVERRIDE_FREQUENCY;
 #endif
+#ifdef USERPREFS_LORACONFIG_FREQUENCY_OFFSET
+    loraConfig.frequency_offset = USERPREFS_LORACONFIG_FREQUENCY_OFFSET;
+#endif
 }
 
 bool Channels::ensureLicensedOperation()

@@ -49,14 +49,16 @@
   // "USERPREFS_BLOCK_POSITION_ON_EVENT_CHANNEL": "1", // Block location TX + discard inbound location on channels keyed with USERPREFS_CHANNEL_0_PSK. Defaults off, and must be set explicitly.
   // "USERPREFS_FIRMWARE_EDITION": "meshtastic_FirmwareEdition_BURNING_MAN",
   // "USERPREFS_FIXED_BLUETOOTH": "121212",
-  // "USERPREFS_FIXED_GPS": "",
+  // "USERPREFS_FIXED_GPS": "", // Fixed position below; applied on first boot, on a fresh or factory-reset config, and after an NVS erase
   // "USERPREFS_FIXED_GPS_ALT": "0",
   // "USERPREFS_FIXED_GPS_LAT": "48.85873920",
   // "USERPREFS_FIXED_GPS_LON": "2.294508368",
   // "USERPREFS_CONFIG_SMART_POSITION_ENABLED": "false",
   // "USERPREFS_CONFIG_GPS_UPDATE_INTERVAL": "600",
   // "USERPREFS_CONFIG_POSITION_BROADCAST_INTERVAL": "1800",
+  // "USERPREFS_CONFIG_DEVICE_TELEM_ENABLED": "true", // Broadcast device telemetry to the mesh (default off since 2.8)
   // "USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL": "900", // Device telemetry update interval in seconds
+  // "USERPREFS_DIAG_MIN_BROADCAST_SECS": "300", // Diagnostics only: lowers the telemetry (30 min) and position (1 h, 6 h when fixed/stationary) broadcast floors to this value (min 300)
   // "USERPREFS_CONFIG_ENV_TELEM_UPDATE_INTERVAL": "900",     // Environment telemetry update interval in seconds
   // "USERPREFS_CONFIG_ENVIRONMENT_MEASUREMENT_ENABLED": "1", // Force BMP280/sensor reads + LoRa broadcast on first boot
   // "USERPREFS_CONFIG_ENV_SCREEN_SCREEN_ENABLED": "1",      // Environment telemetry enable on screen
@@ -66,6 +68,7 @@
   // "USERPREFS_LORACONFIG_CHANNEL_NUM": "31",
   // "USERPREFS_LORACONFIG_TX_POWER": "0",
   // "USERPREFS_LORACONFIG_MODEM_PRESET": "meshtastic_Config_LoRaConfig_ModemPreset_SHORT_FAST",
+  // "USERPREFS_LORACONFIG_FREQUENCY_OFFSET": "-0.005", // MHz added to the slot frequency to cancel radio crystal error; reapplied on every boot
   // "USERPREFS_CONFIG_SECURITY_PACKET_SIGNATURE_POLICY": "meshtastic_Config_SecurityConfig_PacketSignaturePolicy_PACKET_SIGNATURE_POLICY_BALANCED", // Authenticity policy applied to remotely received packets.
   // "USERPREFS_USE_ADMIN_KEY_0": "{ 0xcd, 0xc0, 0xb4, 0x3c, 0x53, 0x24, 0xdf, 0x13, 0xca, 0x5a, 0xa6, 0x0c, 0x0d, 0xec, 0x85, 0x5a, 0x4c, 0xf6, 0x1a, 0x96, 0x04, 0x1a, 0x3e, 0xfc, 0xbb, 0x8e, 0x33, 0x71, 0xe5, 0xfc, 0xff, 0x3c }",
   // "USERPREFS_USE_ADMIN_KEY_1": "{}",
@@ -120,7 +123,7 @@
   // "USERPREFS_NODEINFO_REPLY_SUPPRESS_SECS": "43200", // After answering a node's NodeInfo request, ignore its further requests for this long (default 43200)
   // "USERPREFS_PHONEAPI_REPLAY_TYPES": "0x1", // Cached records replayed to the app after sync: bit 0 position, 1 device telemetry, 2 environment, 3 status; 0 = none (default 0xF)
   // "USERPREFS_PHONEAPI_REPLAY_MAX_AGE_SECS": "7200", // Replay only records of nodes heard within this many seconds; nothing is replayed while the node has no clock (default: no limit)
-  "USERPREFS_XEDDSA_SIGN_LEGACY": "false", // Sign in the v1 whole-envelope layout (#11422) instead of the legacy one; both layouts are always accepted
+  //"USERPREFS_XEDDSA_SIGN_LEGACY": "false", // Sign in the v1 whole-envelope layout (#11422) instead of the legacy one; both layouts are always accepted
   // "USERPREFS_UI_TEST_LOG": "true", // Test-only: emits `Screen: frame N/M name=... reason=...` log per UI transition (for the meshtastic-mcp ui test tier); off in release builds.
   "USERPREFS_RINGTONE_RTTTL": "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p",
   // "USERPREFS_NETWORK_IPV6_ENABLED": "1",
