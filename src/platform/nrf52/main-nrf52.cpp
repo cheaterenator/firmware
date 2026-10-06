@@ -496,6 +496,24 @@ void nrf52FlashQuiesce()
     flash_nrf5x_flush();
 }
 
+#ifdef NRF52_REBOOT_VIA_WATCHDOG
+// Reboot through the WDT instead of SYSRESETREQ, for a board that comes back from a pin reset
+// but not from NVIC_SystemReset(): a watchdog reset reaches what a pin reset does (WDT, debug,
+// RAM), a soft reset does not. The reload value is locked while the WDT runs, so this waits out
+// up to APP_WATCHDOG_SECS. IRQs stay masked so the CPU never sleeps, which would pause the
+// PAUSE_SLEEP counter. Returns only if the WDT is not running yet, leaving the caller's reset.
+void nrf52WatchdogReset()
+{
+    if (!(NRF_WDT->RUNSTATUS & WDT_RUNSTATUS_RUNSTATUS_Msk))
+        return;
+    LOG_WARN("Rebooting via watchdog, up to %u s", APP_WATCHDOG_SECS);
+    Serial.flush();
+    __disable_irq();
+    while (true)
+        __NOP();
+}
+#endif
+
 void cpuDeepSleep(uint32_t msecToWake)
 {
     // FIXME, configure RTC or button press to wake us

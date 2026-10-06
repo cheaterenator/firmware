@@ -132,6 +132,9 @@ extern bool pauseBluetoothLogging;
 
 void nrf52Setup(), esp32Setup(), nrf52Loop(), esp32Loop(), rp2040Setup(), rp2040Loop(), clearBonds(), enterDfuMode(),
     nrf52FlashQuiesce(), stm32wlSetup();
+#ifdef NRF52_REBOOT_VIA_WATCHDOG
+void nrf52WatchdogReset();
+#endif
 #ifdef ARCH_ESP32
 void esp32ReleaseBluetoothMemoryIfUnused();
 #endif

@@ -1023,6 +1023,9 @@ void Power::reboot()
     ESP.restart();
 #elif defined(ARCH_NRF52)
     nrf52FlashQuiesce();
+#ifdef NRF52_REBOOT_VIA_WATCHDOG
+    nrf52WatchdogReset();
+#endif
     NVIC_SystemReset();
 #elif defined(ARCH_RP2040)
     rp2040.reboot();
