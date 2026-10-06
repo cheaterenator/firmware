@@ -22,8 +22,8 @@ void HexToBytes(uint8_t *result, const std::string hex, size_t len = 0)
 
 void setUp(void)
 {
-    // The XEdDSA cases pin what the v1 layout covers, but the build signs the legacy layout by
-    // default (USERPREFS_XEDDSA_SIGN_LEGACY). Opt in here; the legacy cases switch it themselves.
+    // The XEdDSA cases pin what the v1 layout covers, and USERPREFS_XEDDSA_SIGN_LEGACY can switch the
+    // build to legacy signing. Pin v1 here; the legacy cases switch it themselves.
     crypto->setXeddsaSignLegacy(false);
 }
 

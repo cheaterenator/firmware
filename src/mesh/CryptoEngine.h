@@ -67,12 +67,12 @@ static constexpr size_t XEDDSA_SIGN_BUF_LEN = XEDDSA_SIGNED_HEADER_LEN + meshtas
 // Bit positions in the signing buffer's flags byte.
 #define XEDDSA_SIGNED_FLAG_WANT_RESPONSE 0x01
 #define XEDDSA_SIGNED_FLAG_HAS_BITFIELD 0x02
-// Which layout this node signs with: true = the legacy [from|id|portnum|payload] layout that builds
-// before #11422 sign and verify, false = the versioned whole-envelope layout above. Verification
-// accepts both either way, so a mesh can move across the layout change one node at a time; switch
-// to false once no peer still runs a build that verifies only the legacy layout.
+// Which layout this node signs with: false = the versioned whole-envelope layout above (#11422),
+// true = the legacy [from|id|portnum|payload] layout that builds before #11422 sign and verify.
+// Verification accepts both either way, so a mesh can move across the layout change one node at a
+// time; set it to true only while peers still run a build that verifies only the legacy layout.
 #ifndef USERPREFS_XEDDSA_SIGN_LEGACY
-#define USERPREFS_XEDDSA_SIGN_LEGACY true
+#define USERPREFS_XEDDSA_SIGN_LEGACY false
 #endif
 
 class CryptoEngine
