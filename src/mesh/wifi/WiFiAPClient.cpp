@@ -228,6 +228,9 @@ static void onNetworkConnected()
             syslog.appName("Meshtastic");
             syslog.defaultPriority(LOGLEVEL_USER);
             syslog.enable();
+#ifdef ARCH_ESP32
+            esp32LogResetReason();
+#endif
         }
 
 #if defined(ARCH_ESP32) && !MESHTASTIC_EXCLUDE_WEBSERVER

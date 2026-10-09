@@ -30,6 +30,7 @@
 #include <driver/rtc_io.h>
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
+#include <esp_system.h>
 #include <nvs.h>
 #include <nvs_flash.h>
 
@@ -42,6 +43,9 @@ void variant_shutdown() {}
 static bool bluetoothMemoryReleased;
 static bool bluetoothMemoryReleaseWarned;
 #endif
+
+// NVS "rebootCounter" as of this boot, repeated by esp32LogResetReason()
+static uint32_t deviceRebootCount;
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !MESHTASTIC_EXCLUDE_BLUETOOTH
 static bool isNetworkConfiguredToDisableBluetooth()
@@ -260,6 +264,7 @@ void esp32Setup()
     if (hwven != HW_VENDOR)
         preferences.putUInt("hwVendor", HW_VENDOR);
     preferences.end();
+    deviceRebootCount = rebootCounter;
     LOG_DEBUG("Number of Device Reboots: %d", rebootCounter);
 #if !MESHTASTIC_EXCLUDE_WIFI
     String version = MeshtasticOTA::getVersion();
@@ -327,6 +332,78 @@ void esp32Loop()
 
     // for debug printing
     // radio.radioIf.canSleep();
+}
+
+// initDeepSleep() logs the reset reason before the network is up, so syslog never sees it, and its
+// rtc_get_reset_reason() mapping reports a panic and ESP.restart() alike. esp_reset_reason() tells a panic,
+// the watchdogs and a brownout apart. Called once syslog starts.
+void esp32LogResetReason()
+{
+    const esp_reset_reason_t reason = esp_reset_reason();
+    const char *name = "unknown";
+    bool unexpected = false;
+    switch (reason) {
+    case ESP_RST_POWERON:
+        name = "power-on";
+        break;
+    case ESP_RST_EXT:
+        name = "external pin";
+        break;
+    case ESP_RST_SW:
+        name = "software restart";
+        break;
+    case ESP_RST_DEEPSLEEP:
+        name = "deep sleep wake";
+        break;
+    case ESP_RST_USB:
+        name = "USB";
+        break;
+    case ESP_RST_JTAG:
+        name = "JTAG";
+        break;
+    case ESP_RST_PANIC:
+        name = "panic (exception/abort)";
+        unexpected = true;
+        break;
+    case ESP_RST_INT_WDT:
+        name = "interrupt watchdog";
+        unexpected = true;
+        break;
+    case ESP_RST_TASK_WDT:
+        name = "task watchdog";
+        unexpected = true;
+        break;
+    case ESP_RST_WDT:
+        name = "other watchdog";
+        unexpected = true;
+        break;
+    case ESP_RST_BROWNOUT:
+        name = "brownout";
+        unexpected = true;
+        break;
+    case ESP_RST_PWR_GLITCH:
+        name = "power glitch";
+        unexpected = true;
+        break;
+    case ESP_RST_CPU_LOCKUP:
+        name = "CPU lockup";
+        unexpected = true;
+        break;
+    case ESP_RST_SDIO:
+        name = "SDIO";
+        break;
+    case ESP_RST_EFUSE:
+        name = "efuse error";
+        unexpected = true;
+        break;
+    default:
+        break;
+    }
+    if (unexpected) {
+        LOG_WARN("Last reset reason: %s (%d), device reboots %u", name, (int)reason, (unsigned)deviceRebootCount);
+    } else {
+        LOG_INFO("Last reset reason: %s (%d), device reboots %u", name, (int)reason, (unsigned)deviceRebootCount);
+    }
 }
 
 #if SOC_PM_SUPPORT_EXT1_WAKEUP

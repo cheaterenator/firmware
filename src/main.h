@@ -137,6 +137,7 @@ void nrf52WatchdogReset();
 #endif
 #ifdef ARCH_ESP32
 void esp32ReleaseBluetoothMemoryIfUnused();
+void esp32LogResetReason();
 #endif
 
 meshtastic_DeviceMetadata getDeviceMetadata();
