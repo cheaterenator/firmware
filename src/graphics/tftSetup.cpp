@@ -418,7 +418,7 @@ void tftSetup(void)
         static char *panels[] = {"NOSCREEN", "X11",     "FB",      "ST7789",  "ST7735",  "ST7735S",
                                  "ST7796",   "ILI9341", "ILI9342", "ILI9486", "ILI9488", "HX8357D"};
         static char *touch[] = {"NOTOUCH", "XPT2046", "STMPE610", "GT911", "FT5x06"};
-#if defined(USE_X11)
+#if defined(USE_X11) || defined(USE_SDL)
         if (portduino_config.displayPanel == x11) {
             if (portduino_config.displayWidth && portduino_config.displayHeight)
                 displayConfig = DisplayDriverConfig(DisplayDriverConfig::device_t::X11, (uint16_t)portduino_config.displayWidth,
@@ -488,9 +488,23 @@ void tftSetup(void)
                     .i2c{.i2c_addr = (uint8_t)portduino_config.touchscreenI2CAddr}});
             }
         }
+#if defined(USE_SDL)
+        // Windows hands a window's messages only to the thread that created it, and LVGL's SDL
+        // driver polls them from lv_timer_handler() on the tft thread. Create and init the screen
+        // there too.
+        static DisplayDriverConfig sdlDisplayConfig;
+        sdlDisplayConfig = displayConfig;
+        PacketAPI::create(PacketServer::init());
+        new std::thread([] {
+            deviceScreen = &DeviceScreen::create(&sdlDisplayConfig, &reentrantSpiLock);
+            deviceScreen->init(new PacketClient);
+            tft_task_handler();
+        });
+#else
         deviceScreen = &DeviceScreen::create(&displayConfig, &reentrantSpiLock);
         PacketAPI::create(PacketServer::init());
         deviceScreen->init(new PacketClient);
+#endif
     } else {
         LOG_INFO("Running without TFT display");
     }
@@ -520,7 +534,7 @@ void tftSetup(void)
         tftSleepObserver->observe(&notifyLightSleep);
         endSleepObserver->observe(&notifyLightSleepEnd);
         xTaskCreatePinnedToCore(tft_task_handler, "tft", TFT_TASK_STACK_SIZE, NULL, 1, NULL, 0);
-#elif defined(ARCH_PORTDUINO)
+#elif defined(ARCH_PORTDUINO) && !defined(USE_SDL) // USE_SDL started its thread above
         std::thread *tft_task = new std::thread([] { tft_task_handler(); });
 #endif
     }
