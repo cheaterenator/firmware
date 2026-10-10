@@ -7,30 +7,16 @@ IKOKA STICK EBYTE + XIAO-S3
 #define LED_PIN 48
 #define LED_STATE_ON 1 // State when LED is lit
 
-#define BUTTON_PIN 21 // This is the Program Button
+#define BUTTON_PIN 1 // D0, Ikoka Stick user button (100k pull-up on the stick)
 #define BUTTON_NEED_PULLUP
 
-#define BATTERY_PIN -1
-#define ADC_CHANNEL ADC_CHANNEL_0
-#define BATTERY_SENSE_RESOLUTION_BITS 12
-
-
+// No battery sense on the stick. Defining BATTERY_PIN (even as -1) makes Power.cpp claim ADC_CHANNEL,
+// and ADC1 channel 0 is GPIO1 = D0, the user button.
 
 #define I2C_SDA 43
 #define I2C_SCL 44
 
-
-#define GPS_L76K
-#ifdef GPS_L76K
-#define GPS_RX_PIN -1
-#define GPS_TX_PIN -1
-#define HAS_GPS 1
-#define GPS_THREAD_INTERVAL 50
-#define PIN_SERIAL1_RX PIN_GPS_TX
-#define PIN_SERIAL1_TX PIN_GPS_RX
-#define PIN_GPS_STANDBY 1
-#endif
-
+// No GNSS on the stick: the XIAO L76K block's PIN_GPS_STANDBY drove D0, the user button.
 
 // XIAO S3 LORA module
 #define USE_SX1262

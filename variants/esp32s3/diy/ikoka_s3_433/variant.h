@@ -7,13 +7,11 @@ IKOKA STICK EBYTE + XIAO-S3
 #define LED_PIN 48
 #define LED_STATE_ON 1 // State when LED is lit
 
-#define BUTTON_PIN 21 // This is the Program Button
+#define BUTTON_PIN 1 // D0, Ikoka Stick user button (100k pull-up on the stick)
 #define BUTTON_NEED_PULLUP
 
-#define BATTERY_PIN -1
-#define ADC_CHANNEL ADC_CHANNEL_0
-#define BATTERY_SENSE_RESOLUTION_BITS 12
-
+// No battery sense on the stick. Defining BATTERY_PIN (even as -1) makes Power.cpp claim ADC_CHANNEL,
+// and ADC1 channel 0 is GPIO1 = D0, the user button.
 
 #define I2C_SDA 43
 #define I2C_SCL 44

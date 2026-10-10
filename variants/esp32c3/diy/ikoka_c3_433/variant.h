@@ -19,7 +19,7 @@ extern "C" {
 
 
 // Button
-#define BUTTON_PIN (1) // BOOT button
+#define BUTTON_PIN (2) // D0, Ikoka Stick user button (100k pull-up on the stick)
 
 // LoRa
 
