@@ -1683,7 +1683,9 @@ void loop()
             rebootAtMsec = Time::timerEndsAtMillis(25);
         }
     }
-#if HAS_TFT
+    // The SDL window behind `Display: Panel: X11` gets its events and frames only from this
+    // call, so it has to run in BaseUI-only builds (native-windows-tft) too, not just MUI ones.
+#if HAS_SCREEN
     if (screen && portduino_config.displayPanel == x11 &&
         config.display.displaymode != meshtastic_Config_DisplayConfig_DisplayMode_COLOR) {
         auto dispdev = screen->getDisplayDevice();

@@ -546,6 +546,19 @@ void portduinoSetup()
         portduino_config.lora_module = use_simradio;
     }
 
+#if defined(_WIN32) && HAS_SCREEN
+    // native-windows-tft exists to show BaseUI in a window, and a Windows host has no
+    // /etc/meshtasticd/config.yaml (nor, under -s, any config search) to ask for one. Open a
+    // 320x240 SDL window unless a config source picked a display. OffsetRotate 0: the default
+    // of 1 suits SPI panels and turns the window's image sideways.
+    if (portduino_config.displayPanel == no_screen) {
+        portduino_config.displayPanel = x11;
+        portduino_config.displayWidth = 320;
+        portduino_config.displayHeight = 240;
+        portduino_config.displayOffsetRotate = 0;
+    }
+#endif
+
 #ifndef ARCH_PORTDUINO_WASM
     // --check wins over --output-yaml: asking for validation and getting a config dump
     // with no report at all would be the more surprising of the two outcomes.
