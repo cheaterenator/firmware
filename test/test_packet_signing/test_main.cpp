@@ -223,6 +223,11 @@ class AuthPipelineMqtt : public MQTT
 {
   public:
     int queueSize() { return mqttQueue.numUsed(); }
+    std::string popTopic()
+    {
+        std::unique_ptr<QueueEntry> entry(mqttQueue.dequeuePtr(0));
+        return entry ? entry->topic : std::string();
+    }
     void clearQueue()
     {
         while (QueueEntry *entry = mqttQueue.dequeuePtr(0))
@@ -1808,10 +1813,40 @@ void test_C19_proven_ack_reaches_phone_as_valid(void)
     packetPool.release(delivered);
 }
 
-// C20: a PKI packet to us from a sender whose key we lack fails decryption and is rejected at the auth
+// C20: a PKI DM between two other nodes is opaque to us, so it takes the relay-only path, where upstream
+// uplinks it to MQTT on the PKI topic. This fork never uplinks a non-broadcast packet (MQTT::onSend), and
+// the opaque path must not get around that: the DM is relayed over LoRa and stays off MQTT.
+void test_C20_opaque_pki_dm_is_relayed_but_kept_off_mqtt(void)
+{
+    moduleConfig.mqtt.enabled = true;
+    moduleConfig.mqtt.encryption_enabled = true;
+    strcpy(moduleConfig.mqtt.root, "msh");
+    channels.getByIndex(0).settings.uplink_enabled = true;
+
+    meshtastic_MeshPacket dm = meshtastic_MeshPacket_init_zero;
+    dm.from = REMOTE_NODE;
+    dm.to = REMOTE_NODE + 1;
+    dm.id = 0xC2000020;
+    dm.channel = 0; // PKI packets carry no channel hash
+    dm.hop_limit = 2;
+    dm.hop_start = 3;
+    dm.which_payload_variant = meshtastic_MeshPacket_encrypted_tag;
+    dm.encrypted.size = 40;
+    memset(dm.encrypted.bytes, 0x5A, dm.encrypted.size);
+
+    TEST_ASSERT_EQUAL(static_cast<int>(RoutingAuthVerdict::OPAQUE_RELAY_ONLY), static_cast<int>(passesRoutingAuthGate(&dm)));
+    runPipelineIngress(dm);
+    TEST_ASSERT_EQUAL_MESSAGE(1, pipelineRadio->sendCalls, "the DM is still relayed over LoRa");
+    TEST_ASSERT_EQUAL_MESSAGE(0, pipelineMqtt->queueSize(), "a DM must never be uplinked to MQTT");
+    TEST_ASSERT_EQUAL(0, pipelineModule->calls);
+    TEST_ASSERT_NULL(pipelineService->getForPhone());
+    TEST_ASSERT_FALSE(pipelineRouter->historyContains(&dm));
+}
+
+// C21: a PKI packet to us from a sender whose key we lack fails decryption and is rejected at the auth
 // gate, so ReliableRouter never sees it. It must still earn a PKI_UNKNOWN_PUBKEY NAK, want_ack or not:
 // that NAK is what makes the sender send us its NodeInfo, and with it the key. Once per sender per window.
-void test_C20_pki_from_sender_with_unknown_key_is_nakked_once(void)
+void test_C21_pki_from_sender_with_unknown_key_is_nakked_once(void)
 {
     uint8_t localPub[32], localPriv[32];
     crypto->generateKeyPair(localPub, localPriv);
@@ -2650,7 +2685,8 @@ void setup()
     RUN_TEST(test_C17_colliding_channel_hash_foreign_broadcast_is_relay_only);
     RUN_TEST(test_C18_inbound_ack_proof_status_is_cleared_before_modules_and_phone);
     RUN_TEST(test_C19_proven_ack_reaches_phone_as_valid);
-    RUN_TEST(test_C20_pki_from_sender_with_unknown_key_is_nakked_once);
+    RUN_TEST(test_C20_opaque_pki_dm_is_relayed_but_kept_off_mqtt);
+    RUN_TEST(test_C21_pki_from_sender_with_unknown_key_is_nakked_once);
     printf("\n=== Group N: NodeInfoModule authentication ===\n");
     RUN_TEST(test_N1_unsigned_nodeinfo_from_signer_dropped);
     RUN_TEST(test_N2_signed_nodeinfo_from_signer_not_dropped);
