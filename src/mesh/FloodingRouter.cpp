@@ -30,8 +30,9 @@ ErrorCode FloodingRouter::send(meshtastic_MeshPacket *p)
 bool FloodingRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
 {
     bool wasUpgraded = false;
-    bool seenRecently =
-        wasSeenRecently(p, true, nullptr, nullptr, &wasUpgraded); // Updates history; returns false when an upgrade is detected
+    bool wasHeardOverLora = false;
+    bool seenRecently = wasSeenRecently(p, true, nullptr, nullptr, &wasUpgraded,
+                                        &wasHeardOverLora); // Updates history; returns false when an upgrade is detected
 
     // Handle hop_limit upgrade scenario for rebroadcasters
     if (wasUpgraded && perhapsHandleUpgradedPacket(p)) {
@@ -50,11 +51,17 @@ bool FloodingRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
         the ACK got lost, we will handle the packet again to make sure it gets an implicit ACK. */
         bool isRepeated = p->hop_start > 0 && p->hop_start == p->hop_limit;
         if (isRepeated) {
-            LOG_DEBUG("Repeated reliable tx");
-            // Check if it's still in the Tx queue, if not, we have to relay it again
-            if (!findInTxQueue(p->from, p->id)) {
-                if (reprocessPacket(p))
-                    perhapsRebroadcast(p);
+            if (isOriginatorRetransmission(p, wasHeardOverLora)) {
+                LOG_DEBUG("Repeated reliable tx");
+                // Check if it's still in the Tx queue, if not, we have to relay it again
+                if (!findInTxQueue(p->from, p->id)) {
+                    if (reprocessPacket(p))
+                        perhapsRebroadcast(p);
+                }
+            } else {
+                // The originator's first transmission, heard after a UDP/MQTT copy of it, or that copy after it.
+                // Not someone else's rebroadcast either, so a relay we have queued stays queued.
+                LOG_DEBUG("Zero-hop copy via another transport, not a retransmission");
             }
         } else {
             perhapsCancelDupe(p);
@@ -138,6 +145,12 @@ bool FloodingRouter::roleAllowsCancelingDupe(const meshtastic_MeshPacket *p)
 
 void FloodingRouter::perhapsCancelDupe(const meshtastic_MeshPacket *p)
 {
+    // Never for our own packet. A relay of it heard while ours is still queued came from a UDP/MQTT peer that got it
+    // off-air; cancelling (or delaying) ours would leave LoRa neighbours out of that peer's range without it.
+    // NextHopRouter::stopRetransmission() keeps our first transmission for the same reason.
+    if (isFromUs(p))
+        return;
+
     if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA && roleAllowsCancelingDupe(p)) {
         // cancel rebroadcast of this message *if* there was already one, unless we're a router!
         // But only LoRa packets should be able to trigger this.
@@ -151,6 +164,11 @@ void FloodingRouter::perhapsCancelDupe(const meshtastic_MeshPacket *p)
         nodeDB->isFromOrToFavoritedNode(*p)) {
         iface->clampToLateRebroadcastWindow(getFrom(p), p->id);
     }
+}
+
+bool FloodingRouter::isOriginatorRetransmission(const meshtastic_MeshPacket *p, bool wasHeardOverLora)
+{
+    return p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA && wasHeardOverLora;
 }
 
 bool FloodingRouter::isRebroadcaster()

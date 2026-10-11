@@ -146,6 +146,9 @@ class NextHopRouter : public FloodingRouter
     };
     OpaqueSeen opaqueSeen[OPAQUE_SEEN_MAX] = {};
     uint8_t opaqueSeenNext = 0; // ring write cursor (round-robin eviction)
+    // Bit i: slot i's frame arrived over LoRa at least once, not only over UDP/MQTT (see isOriginatorRetransmission)
+    uint32_t opaqueHeardOverLora = 0;
+    static_assert(OPAQUE_SEEN_MAX <= 32, "opaqueHeardOverLora holds one bit per opaqueSeen slot");
 
     /**
      * Should this incoming filter be dropped?
@@ -156,8 +159,9 @@ class NextHopRouter : public FloodingRouter
     virtual bool shouldFilterReceived(const meshtastic_MeshPacket *p) override;
     bool relayOpaquePacket(const meshtastic_MeshPacket *p) override;
     // Dedup helper for relayOpaquePacket: true if (from,id) is already recorded; otherwise records it
-    // (round-robin eviction) and returns false. Pure function of the table - no clock.
-    bool opaqueWasSeenRecently(NodeNum from, PacketId id);
+    // (round-robin eviction) and returns false. overLora marks the entry as heard over LoRa, and
+    // wasHeardOverLora reports whether an earlier copy already was. Pure function of the table - no clock.
+    bool opaqueWasSeenRecently(NodeNum from, PacketId id, bool overLora = false, bool *wasHeardOverLora = nullptr);
 
     /**
      * Look for packets we need to relay

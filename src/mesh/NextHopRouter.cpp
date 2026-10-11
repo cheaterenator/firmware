@@ -54,9 +54,13 @@ bool NextHopRouter::relayOpaquePacket(const meshtastic_MeshPacket *p)
     // every copy of every frame, multiplying at each hop into an unbounded broadcast storm ("let hop
     // exhaustion bound it" caps depth, not count). Suppress duplicate opaque rebroadcasts with a small,
     // routing-isolated seen-set. Genuine originator (re)transmissions (hop_start == hop_limit) are
-    // always relayed so reliable opaque unicast still propagates (mirrors FloodingRouter's isRepeated).
+    // always relayed so reliable opaque unicast still propagates (mirrors FloodingRouter's isRepeated),
+    // but not a zero-hop copy that only crossed UDP/MQTT (isOriginatorRetransmission).
     const bool isOriginatorTx = p->hop_start > 0 && p->hop_start == p->hop_limit;
-    if (opaqueWasSeenRecently(getFrom(p), p->id) && !isOriginatorTx) {
+    bool wasHeardOverLora = false;
+    const bool overLora = p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA;
+    if (opaqueWasSeenRecently(getFrom(p), p->id, overLora, &wasHeardOverLora) &&
+        !(isOriginatorTx && isOriginatorRetransmission(p, wasHeardOverLora))) {
         LOG_TRACE("Drop duplicate opaque relay from 0x%08x id 0x%08x", getFrom(p), p->id);
         return false;
     }
@@ -81,16 +85,27 @@ bool NextHopRouter::relayOpaquePacket(const meshtastic_MeshPacket *p)
 // ring; otherwise records it (round-robin eviction) and returns false. A separate table from
 // PacketHistory on purpose: opaque frames must never influence routing/ACK/next-hop. No timestamps -
 // a stale (from,id) can't false-match a later packet because ids are effectively random.
-bool NextHopRouter::opaqueWasSeenRecently(NodeNum from, PacketId id)
+bool NextHopRouter::opaqueWasSeenRecently(NodeNum from, PacketId id, bool overLora, bool *wasHeardOverLora)
 {
+    if (wasHeardOverLora)
+        *wasHeardOverLora = false;
     for (uint8_t i = 0; i < OPAQUE_SEEN_MAX; i++) {
-        if (opaqueSeen[i].sender == from && opaqueSeen[i].id == id)
+        if (opaqueSeen[i].sender == from && opaqueSeen[i].id == id) {
+            if (wasHeardOverLora)
+                *wasHeardOverLora = (opaqueHeardOverLora >> i) & 1;
+            if (overLora)
+                opaqueHeardOverLora |= 1UL << i;
             return true;
+        }
     }
     // Not seen: record it, overwriting the oldest-written slot (FIFO). Empty slots hold id 0, which a
     // real entry never has (relayOpaquePacket drops id 0), so they simply never match above.
     opaqueSeen[opaqueSeenNext].sender = from;
     opaqueSeen[opaqueSeenNext].id = id;
+    if (overLora)
+        opaqueHeardOverLora |= 1UL << opaqueSeenNext;
+    else
+        opaqueHeardOverLora &= ~(1UL << opaqueSeenNext);
     opaqueSeenNext = (uint8_t)((opaqueSeenNext + 1) % OPAQUE_SEEN_MAX);
     return false;
 }
@@ -137,8 +152,9 @@ bool NextHopRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
     bool wasFallback = false;
     bool weWereNextHop = false;
     bool wasUpgraded = false;
-    bool seenRecently = wasSeenRecently(p, true, &wasFallback, &weWereNextHop,
-                                        &wasUpgraded); // Updates history; returns false when an upgrade is detected
+    bool wasHeardOverLora = false;
+    bool seenRecently = wasSeenRecently(p, true, &wasFallback, &weWereNextHop, &wasUpgraded,
+                                        &wasHeardOverLora); // Updates history; returns false when an upgrade is detected
 
     // Handle hop_limit upgrade scenario for rebroadcasters
     if (wasUpgraded && perhapsHandleUpgradedPacket(p)) {
@@ -163,9 +179,11 @@ bool NextHopRouter::shouldFilterReceived(const meshtastic_MeshPacket *p)
             }
         } else {
             bool isRepeated = getHopsAway(*p) == 0;
-            // If repeated and not in Tx queue anymore, try relaying again, or if we are the destination, send the ACK again
+            // If repeated and not in Tx queue anymore, try relaying again, or if we are the destination, send the ACK again.
+            // Not for a zero-hop copy bridged over UDP/MQTT (isOriginatorRetransmission), which is no one else's relay
+            // either, so it leaves ours alone.
             if (isRepeated) {
-                if (!findInTxQueue(p->from, p->id)) {
+                if (isOriginatorRetransmission(p, wasHeardOverLora) && !findInTxQueue(p->from, p->id)) {
                     if (reprocessPacket(p) && !isBlockedEventCoordinatePacket(p) && !perhapsRebroadcast(p) && isToUs(p) &&
                         p->want_ack) {
                         sendAckNak(meshtastic_Routing_Error_NONE, getFrom(p), p->id, p->channel, 0);

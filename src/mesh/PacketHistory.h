@@ -8,6 +8,7 @@
 #define HOP_LIMIT_HIGHEST_MASK 0x07 // Bits 0-2
 #define HOP_LIMIT_OUR_TX_MASK 0x38  // Bits 3-5
 #define HOP_LIMIT_OUR_TX_SHIFT 3    // Bits 3-5
+#define HOP_LIMIT_HEARD_LORA_MASK 0x40 // Bit 6
 
 /**
  * This is a mixin that adds a record of past packets we have seen
@@ -21,7 +22,8 @@ class PacketHistory
         uint32_t rxTimeMsec;              // Unix time in msecs - the time we received it,  0 means empty
         uint8_t next_hop;                 // The next hop asked for this packet
         uint8_t hop_limit;                // bit 0-2: Highest hop limit observed for this packet,
-                                          // bit 3-5: our hop limit when we first transmitted it
+                                          // bit 3-5: our hop limit when we first transmitted it,
+                                          // bit 6: a copy of it arrived over LoRa (not only UDP/MQTT)
         uint8_t relayed_by[NUM_RELAYERS]; // Array of nodes that relayed this packet
     }; // 4B + 4B + 4B + 1B + 1B + 6B = 20B
     static_assert(sizeof(PacketRecord) == 20,
@@ -77,9 +79,10 @@ class PacketHistory
      * @param wasFallback if not nullptr, packet will be checked for fallback to flooding and value will be set to true if so
      * @param weWereNextHop if not nullptr, packet will be checked for us being the next hop and value will be set to true if so
      * @param wasUpgraded if not nullptr, will be set to true if this packet has better hop_limit than previously seen
+     * @param wasHeardOverLora if not nullptr, will be set to true if an earlier copy of this packet arrived over LoRa
      */
     bool wasSeenRecently(const meshtastic_MeshPacket *p, bool withUpdate = true, bool *wasFallback = nullptr,
-                         bool *weWereNextHop = nullptr, bool *wasUpgraded = nullptr);
+                         bool *weWereNextHop = nullptr, bool *wasUpgraded = nullptr, bool *wasHeardOverLora = nullptr);
 
     /* Check if a certain node was a relayer of a packet in the history given an ID and sender
      * If wasSole is not nullptr, it will be set to true if the relayer was the only relayer of that packet

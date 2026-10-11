@@ -62,8 +62,11 @@ PacketHistory::PacketHistory(uint32_t size) : recentPacketsCapacity(0) // Initia
 
 /** Update recentPackets and return true if we have already seen this packet */
 bool PacketHistory::wasSeenRecently(const meshtastic_MeshPacket *p, bool withUpdate, bool *wasFallback, bool *weWereNextHop,
-                                    bool *wasUpgraded)
+                                    bool *wasUpgraded, bool *wasHeardOverLora)
 {
+    if (wasHeardOverLora)
+        *wasHeardOverLora = false;
+
     if (!initOk()) {
         LOG_ERROR("Packet History - Was Seen Recently: NOT INITIALIZED");
         return false;
@@ -84,6 +87,9 @@ bool PacketHistory::wasSeenRecently(const meshtastic_MeshPacket *p, bool withUpd
     r.sender = getFrom(p); // If 0 then use our ID
     r.next_hop = p->next_hop;
     setHighestHopLimit(r, p->hop_limit);
+    // Heard over the air, not only bridged in over UDP/MQTT - see FloodingRouter::isOriginatorRetransmission()
+    if (p->transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA)
+        r.hop_limit |= HOP_LIMIT_HEARD_LORA_MASK;
     bool weWillRelay = false;
     uint8_t ourRelayID = nodeDB->getLastByteOfNodeNum(nodeDB->getNodeNum());
     if (p->relay_node == ourRelayID) { // If the relay_node is us, store it
@@ -116,6 +122,9 @@ bool PacketHistory::wasSeenRecently(const meshtastic_MeshPacket *p, bool withUpd
     }
 
     if (seenRecently) {
+        if (wasHeardOverLora)
+            *wasHeardOverLora = (found->hop_limit & HOP_LIMIT_HEARD_LORA_MASK) != 0;
+
         if (wasFallback) {
             // If it was seen with a next-hop not set to us and now it's NO_NEXT_HOP_PREFERENCE, and the relayer relayed already
             // before, it's a fallback to flooding. If we didn't already relay and the next-hop neither, we might need to handle
@@ -174,6 +183,7 @@ bool PacketHistory::wasSeenRecently(const meshtastic_MeshPacket *p, bool withUpd
             // fewer hops remaining.
             if (getHighestHopLimit(*found) > getHighestHopLimit(r))
                 setHighestHopLimit(r, getHighestHopLimit(*found));
+            r.hop_limit |= found->hop_limit & HOP_LIMIT_HEARD_LORA_MASK;
 
             // Add the existing relayed_by to the new record, avoiding duplicates
             for (uint8_t i = 0; i < (NUM_RELAYERS - startIdx); i++) {

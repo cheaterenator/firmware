@@ -4077,9 +4077,12 @@ void NodeDB::updateFrom(const meshtastic_MeshPacket &mp)
         }
 #endif
 
-        // If hopStart was set and there wasn't someone messing with the limit in the middle, add hopsAway
+        // If hopStart was set and there wasn't someone messing with the limit in the middle, add hopsAway.
+        // RF-origin only, like the heard slot above: a UDP or MQTT copy (or a gateway's LoRa rebroadcast of an
+        // MQTT one) counts hops from whoever bridged it, so a node beside that peer - or in another town on the
+        // same broker - would be stored as our 0-hop neighbour, and resolveLastByte() would trust it as one.
         const int8_t hopsAway = getHopsAway(mp);
-        if (hopsAway >= 0) {
+        if (hopsAway >= 0 && mp.transport_mechanism == meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA && !mp.via_mqtt) {
             info->has_hops_away = true;
             info->hops_away = hopsAway;
         }

@@ -222,6 +222,53 @@ static void test_updateFrom_snrTransportGates(void)
     TEST_ASSERT_EQUAL_FLOAT(-3.5f, nb->snr);
 }
 
+// --- updateFrom hops_away admission gates ---
+
+static void test_updateFrom_hopsAwayTransportGates(void)
+{
+    const uint32_t A = 0x52100001, B = 0x52100002, C = 0x52100003, D = 0x52100004;
+
+    // Heard directly over our radio (makeRxPacket: hop_start == hop_limit): a real 0-hop neighbour.
+    heardOverLoRa(A, 4.0f);
+    const meshtastic_NodeInfoLite *na = db->getMeshNode(A);
+    TEST_ASSERT_NOT_NULL(na);
+    TEST_ASSERT_TRUE(na->has_hops_away);
+    TEST_ASSERT_EQUAL_UINT8(0, na->hops_away);
+
+    // The same packet bridged in over UDP or from the broker counts hops from the bridging peer, not from us.
+    meshtastic_MeshPacket mp = makeRxPacket(B);
+    mp.transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP;
+    nodeDB->updateFrom(mp);
+    TEST_ASSERT_NOT_NULL(db->getMeshNode(B));
+    TEST_ASSERT_FALSE_MESSAGE(db->getMeshNode(B)->has_hops_away, "a UDP peer's neighbour is not our 0-hop neighbour");
+
+    mp = makeRxPacket(C);
+    mp.transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MQTT;
+    mp.via_mqtt = true;
+    nodeDB->updateFrom(mp);
+    TEST_ASSERT_NOT_NULL(db->getMeshNode(C));
+    TEST_ASSERT_FALSE_MESSAGE(db->getMeshNode(C)->has_hops_away, "a node on the same broker is not our 0-hop neighbour");
+
+    // A gateway's LoRa rebroadcast of an MQTT packet: the hop count runs across the broker.
+    mp = makeRxPacket(D);
+    mp.via_mqtt = true;
+    mp.hop_limit = 2;
+    nodeDB->updateFrom(mp);
+    TEST_ASSERT_NOT_NULL(db->getMeshNode(D));
+    TEST_ASSERT_FALSE_MESSAGE(db->getMeshNode(D)->has_hops_away, "hops counted across MQTT are not hops from us");
+
+    // A later off-air copy leaves the RF-measured value alone.
+    mp = makeRxPacket(A);
+    mp.hop_limit = 1; // 2 hops over LoRa
+    nodeDB->updateFrom(mp);
+    mp.transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_MULTICAST_UDP;
+    mp.hop_limit = 3; // 0 hops from the UDP peer
+    nodeDB->updateFrom(mp);
+    na = db->getMeshNode(A);
+    TEST_ASSERT_TRUE(na->has_hops_away);
+    TEST_ASSERT_EQUAL_UINT8(2, na->hops_away);
+}
+
 // --- snr_q4 quantization + HAS_SNR sentinel through a real save/boot cycle ---
 
 static void test_snrQuantization_roundTripsThroughDisk(void)
@@ -337,12 +384,13 @@ static void test_fullRoundTrip_headerAndSatelliteFidelity(void)
     meshtastic_NodeInfoLite *m = addUserNode(M, 0x14);
     meshtastic_MeshPacket mp = makeRxPacket(M);
     mp.via_mqtt = true; // gateway rebroadcast: bit stored, SNR still ours
-    mp.hop_start = 5;
-    mp.hop_limit = 2; // hops_away = 3
     mp.rx_snr = 2.0f;
     nodeDB->updateFrom(mp);
     m = db->getMeshNode(M);
     nodeInfoLiteSetBit(m, NODEINFO_BITFIELD_IS_MUTED_MASK, true);
+    // A via_mqtt packet does not set hops_away (test_updateFrom_hopsAwayTransportGates); this case is about the disk.
+    m->has_hops_away = true;
+    m->hops_away = 3;
 
     TEST_ASSERT_TRUE(db->saveDatabase());
     assertTempVectorsEmpty("temp vectors must be cleared after the save projection");
@@ -650,6 +698,7 @@ NDBR_TEST_ENTRY void setup()
 
     printf("\n=== updateFrom SNR gates ===\n");
     RUN_TEST(test_updateFrom_snrTransportGates);
+    RUN_TEST(test_updateFrom_hopsAwayTransportGates);
 
     printf("\n=== snr_q4 + HAS_SNR round trip ===\n");
     RUN_TEST(test_snrQuantization_roundTripsThroughDisk);

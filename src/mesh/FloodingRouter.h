@@ -73,6 +73,11 @@ class FloodingRouter : public Router
     /* Call when receiving a duplicate packet to check whether we should cancel a packet in the Tx queue */
     void perhapsCancelDupe(const meshtastic_MeshPacket *p);
 
+    /* Is this zero-hop duplicate the originator retransmitting, rather than a second path for its first transmission?
+     * Only when it came over LoRa and an earlier copy did too. A UDP/MQTT peer hands us the packet before, or after,
+     * the originator's own LoRa transmission; relaying again on that copy puts our relay on the air twice. */
+    static bool isOriginatorRetransmission(const meshtastic_MeshPacket *p, bool wasHeardOverLora);
+
     // Return true if we are a rebroadcaster
     bool isRebroadcaster();
 };
