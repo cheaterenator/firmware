@@ -18,6 +18,9 @@
 #include <meshUtils.h>
 #include "FSCommon.h"
 #include "SPILock.h"
+#if HAS_WIFI && !defined(ARCH_PORTDUINO)
+#include "mesh/wifi/WiFiAPClient.h"
+#endif
 
 #define MAGIC_USB_BATTERY_LEVEL 101
 static constexpr uint16_t TX_HISTORY_KEY_DEVICE_TELEMETRY = 0x8001;
@@ -204,9 +207,22 @@ meshtastic_Telemetry DeviceTelemetryModule::getLocalStatsExtendedTelemetry()
 
     telemetry.variant.local_stats_extended.cpu_usage_percent = CpuHwUsagePercent;
 
-    LOG_INFO("local stats extended: memory_free=%i, total_memory=%i, cpu=%i, flash_used=%i, flash_total=%i",
-            telemetry.variant.local_stats_extended.memory_free_cheap, telemetry.variant.local_stats_extended.memory_total, CpuHwUsagePercent,
-            telemetry.variant.local_stats_extended.flash_used_bytes, telemetry.variant.local_stats_extended.flash_total_bytes);
+#if HAS_WIFI && !defined(ARCH_PORTDUINO)
+    // Left at 0 (not sent) when we're not a connected station - SoftAP-only or still associating.
+    if (WiFi.status() == WL_CONNECTED)
+        telemetry.variant.local_stats_extended.wifi_rssi = WiFi.RSSI();
+#endif
+#if HAS_WIFI && defined(ARCH_ESP32)
+    telemetry.variant.local_stats_extended.wifi_drops = getWifiDropCount();
+    telemetry.variant.local_stats_extended.wifi_drop_reason = getWifiDropReason();
+#endif
+
+    LOG_INFO("local stats extended: memory_free=%i, total_memory=%i, cpu=%i, flash_used=%i, flash_total=%i, wifi_rssi=%i, "
+             "wifi_drops=%u, wifi_drop_reason=%u",
+             telemetry.variant.local_stats_extended.memory_free_cheap, telemetry.variant.local_stats_extended.memory_total,
+             CpuHwUsagePercent, telemetry.variant.local_stats_extended.flash_used_bytes,
+             telemetry.variant.local_stats_extended.flash_total_bytes, telemetry.variant.local_stats_extended.wifi_rssi,
+             telemetry.variant.local_stats_extended.wifi_drops, telemetry.variant.local_stats_extended.wifi_drop_reason);
 
     return telemetry;
 }

@@ -512,6 +512,12 @@ typedef struct _meshtastic_LocalStatsExtended {
     uint32_t flash_total_bytes;
     uint32_t memory_psram_free;
     uint32_t memory_psram_total;
+    /* dBm of the station link to the AP; 0 when Wi-Fi is not connected as a station */
+    int32_t wifi_rssi;
+    /* Established Wi-Fi station links lost since boot; failed (re)connect attempts don't count */
+    uint32_t wifi_drops;
+    /* ESP-IDF wifi_err_reason_t of the most recent drop counted in wifi_drops; 0 if none yet */
+    uint32_t wifi_drop_reason;
 } meshtastic_LocalStatsExtended;
 
 
@@ -687,7 +693,7 @@ extern "C" {
 #define meshtastic_PowerMetrics_init_default     {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_AirQualityMetrics_init_default {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_LocalStats_init_default       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-#define meshtastic_LocalStatsExtended_init_default {0, 0, 0, 0, 0, 0, 0}
+#define meshtastic_LocalStatsExtended_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_TrafficManagementStats_init_default {0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_HealthMetrics_init_default    {false, 0, false, 0, false, 0}
 #define meshtastic_HostMetrics_init_default      {0, 0, 0, false, 0, false, 0, 0, 0, 0, false, ""}
@@ -702,7 +708,7 @@ extern "C" {
 #define meshtastic_PowerMetrics_init_zero        {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_AirQualityMetrics_init_zero   {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_LocalStats_init_zero          {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-#define meshtastic_LocalStatsExtended_init_zero  {0, 0, 0, 0, 0, 0, 0}
+#define meshtastic_LocalStatsExtended_init_zero  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_TrafficManagementStats_init_zero {0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_HealthMetrics_init_zero       {false, 0, false, 0, false, 0}
 #define meshtastic_HostMetrics_init_zero         {0, 0, 0, false, 0, false, 0, 0, 0, 0, false, ""}
@@ -837,6 +843,9 @@ extern "C" {
 #define meshtastic_LocalStatsExtended_flash_total_bytes_tag 5
 #define meshtastic_LocalStatsExtended_memory_psram_free_tag 6
 #define meshtastic_LocalStatsExtended_memory_psram_total_tag 7
+#define meshtastic_LocalStatsExtended_wifi_rssi_tag 8
+#define meshtastic_LocalStatsExtended_wifi_drops_tag 9
+#define meshtastic_LocalStatsExtended_wifi_drop_reason_tag 10
 #define meshtastic_TrafficManagementStats_packets_inspected_tag 1
 #define meshtastic_TrafficManagementStats_position_dedup_drops_tag 2
 #define meshtastic_TrafficManagementStats_nodeinfo_cache_hits_tag 3
@@ -1032,7 +1041,10 @@ X(a, STATIC,   SINGULAR, UINT32,   cpu_usage_percent,   3) \
 X(a, STATIC,   SINGULAR, UINT32,   flash_used_bytes,   4) \
 X(a, STATIC,   SINGULAR, UINT32,   flash_total_bytes,   5) \
 X(a, STATIC,   SINGULAR, UINT32,   memory_psram_free,   6) \
-X(a, STATIC,   SINGULAR, UINT32,   memory_psram_total,   7)
+X(a, STATIC,   SINGULAR, UINT32,   memory_psram_total,   7) \
+X(a, STATIC,   SINGULAR, INT32,    wifi_rssi,           8) \
+X(a, STATIC,   SINGULAR, UINT32,   wifi_drops,          9) \
+X(a, STATIC,   SINGULAR, UINT32,   wifi_drop_reason,   10)
 #define meshtastic_LocalStatsExtended_CALLBACK NULL
 #define meshtastic_LocalStatsExtended_DEFAULT NULL
 
@@ -1165,7 +1177,7 @@ extern const pb_msgdesc_t meshtastic_SEN6XState_msg;
 #define meshtastic_HealthMetrics_size            11
 #define meshtastic_HostMetrics_size              225
 #define meshtastic_LocalStats_size               87
-#define meshtastic_LocalStatsExtended_size       42
+#define meshtastic_LocalStatsExtended_size       65
 #define meshtastic_Nau7802Config_size            16
 #define meshtastic_PowerMetrics_size             81
 #define meshtastic_SEN5XState_size               27

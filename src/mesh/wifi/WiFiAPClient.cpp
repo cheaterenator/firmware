@@ -49,6 +49,14 @@ NTPClient timeClient(ntpUDP, config.network.ntp_server);
 
 uint8_t wifiDisconnectReason = 0;
 
+#ifdef ARCH_ESP32
+// Unlike wifiDisconnectReason, which every failed (re)connect attempt overwrites, these only move when
+// an associated link goes down - so they say how often a working link drops and why.
+static bool wifiStaLinkUp = false;
+static uint32_t wifiDropCount = 0;
+static uint8_t wifiDropReason = 0;
+#endif
+
 // Stores our hostname
 char ourHost[16];
 
@@ -496,6 +504,11 @@ bool initWifi()
                             https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/wifi.html#wi-fi-reason-code
                     */
                     wifiDisconnectReason = info.wifi_sta_disconnected.reason;
+                    if (wifiStaLinkUp) {
+                        wifiStaLinkUp = false;
+                        wifiDropCount++;
+                        wifiDropReason = info.wifi_sta_disconnected.reason;
+                    }
                 },
                 WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 #endif
@@ -558,6 +571,7 @@ static void WiFiEvent(WiFiEvent_t event)
         break;
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
         LOG_INFO("Connected to access point");
+        wifiStaLinkUp = true;
         if (config.network.ipv6_enabled) {
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
             if (!WiFi.enableIPv6()) {
@@ -747,4 +761,16 @@ uint8_t getWifiDisconnectReason()
 {
     return wifiDisconnectReason;
 }
+
+#ifdef ARCH_ESP32
+uint32_t getWifiDropCount()
+{
+    return wifiDropCount;
+}
+
+uint8_t getWifiDropReason()
+{
+    return wifiDropReason;
+}
+#endif
 #endif // HAS_WIFI

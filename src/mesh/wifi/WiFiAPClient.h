@@ -25,6 +25,14 @@ bool isWifiAvailable();
 
 uint8_t getWifiDisconnectReason();
 
+#ifdef ARCH_ESP32
+/// Established STA links lost since boot. Failed (re)connect attempts don't count.
+uint32_t getWifiDropCount();
+
+/// ESP-IDF reason code of the most recent drop counted by getWifiDropCount(), 0 if none yet.
+uint8_t getWifiDropReason();
+#endif
+
 #if defined(USE_WS5500) || defined(USE_CH390D)
 // Startup Ethernet
 bool initEthernet();

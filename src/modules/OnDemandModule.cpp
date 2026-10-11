@@ -17,6 +17,9 @@
 #include "memGet.h"
 #include <cstring>
 #include <pb_encode.h>
+#if HAS_WIFI && !defined(ARCH_PORTDUINO)
+#include "mesh/wifi/WiFiAPClient.h"
+#endif
 
 OnDemandModule *onDemandModule;
 
@@ -311,6 +314,23 @@ meshtastic_OnDemand OnDemandModule::prepareNodeStats()
     spiLock->unlock();
     s.memory_psram_free = memGet.getFreePsram();  // 0 on hardware without PSRAM - expected
     s.memory_psram_total = memGet.getPsramSize();
+#endif
+
+#if HAS_WIFI && !defined(ARCH_PORTDUINO)
+    // Omitted unless we're a connected station - SoftAP-only or still associating has no AP link to measure.
+    if (WiFi.status() == WL_CONNECTED) {
+        s.has_wifi_rssi = true;
+        s.wifi_rssi = WiFi.RSSI();
+    }
+#endif
+#if HAS_WIFI && defined(ARCH_ESP32)
+    // Same condition initWifi() uses to bring the station up; without it there's no link to drop.
+    if (config.network.wifi_enabled && config.network.wifi_ssid[0]) {
+        s.has_wifi_drops = true;
+        s.wifi_drops = getWifiDropCount();
+        s.has_wifi_drop_reason = s.wifi_drops > 0;
+        s.wifi_drop_reason = getWifiDropReason();
+    }
 #endif
 
     return onDemand;

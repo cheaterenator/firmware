@@ -47,6 +47,14 @@ message NodeStats {
     optional string firmware_version = 32;
     optional uint32 blocked_by_hoplimit = 33;
     optional uint32 fw_plus_version = 34;
+    // dBm of the station link to the AP. Only present while Wi-Fi is connected as a station.
+    optional int32 wifi_rssi = 35;
+    // Established Wi-Fi station links lost since boot; failed (re)connect attempts don't count.
+    // Present whenever Wi-Fi station mode is configured (ESP32 only).
+    optional uint32 wifi_drops = 36;
+    // ESP-IDF wifi_err_reason_t of the most recent drop counted in wifi_drops (e.g. 200 = BEACON_TIMEOUT).
+    // Present once wifi_drops > 0.
+    optional uint32 wifi_drop_reason = 37;
 }
 
 message RxPacketHistory {

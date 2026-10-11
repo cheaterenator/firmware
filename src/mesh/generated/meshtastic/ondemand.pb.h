@@ -122,6 +122,17 @@ typedef struct _meshtastic_NodeStats {
     uint32_t blocked_by_hoplimit;
     bool has_fw_plus_version;
     uint32_t fw_plus_version;
+    /* dBm of the station link to the AP. Only present while Wi-Fi is connected as a station. */
+    bool has_wifi_rssi;
+    int32_t wifi_rssi;
+    /* Established Wi-Fi station links lost since boot; failed (re)connect attempts don't count.
+ Present whenever Wi-Fi station mode is configured (ESP32 only). */
+    bool has_wifi_drops;
+    uint32_t wifi_drops;
+    /* ESP-IDF wifi_err_reason_t of the most recent drop counted in wifi_drops (e.g. 200 = BEACON_TIMEOUT).
+ Present once wifi_drops > 0. */
+    bool has_wifi_drop_reason;
+    uint32_t wifi_drop_reason;
 } meshtastic_NodeStats;
 
 typedef struct _meshtastic_RxPacketHistory {
@@ -284,7 +295,7 @@ extern "C" {
 
 /* Initializer values for message structs */
 #define meshtastic_FwPlusVersion_init_default    {0}
-#define meshtastic_NodeStats_init_default        {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, "", false, 0, false, 0}
+#define meshtastic_NodeStats_init_default        {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, "", false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_RxPacketHistory_init_default  {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_RxAvgTimeHistory_init_default {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_PortCounterEntry_init_default {0, 0}
@@ -304,7 +315,7 @@ extern "C" {
 #define meshtastic_OnDemandResponse_init_default {_meshtastic_OnDemandType_MIN, 0, {meshtastic_RxPacketHistory_init_default}}
 #define meshtastic_OnDemand_init_default         {false, 0, false, 0, 0, {meshtastic_OnDemandRequest_init_default}}
 #define meshtastic_FwPlusVersion_init_zero       {0}
-#define meshtastic_NodeStats_init_zero           {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, "", false, 0, false, 0}
+#define meshtastic_NodeStats_init_zero           {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, "", false, 0, false, 0, false, 0, false, 0, false, 0}
 #define meshtastic_RxPacketHistory_init_zero     {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_RxAvgTimeHistory_init_zero    {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_PortCounterEntry_init_zero    {0, 0}
@@ -360,6 +371,9 @@ extern "C" {
 #define meshtastic_NodeStats_firmware_version_tag 32
 #define meshtastic_NodeStats_blocked_by_hoplimit_tag 33
 #define meshtastic_NodeStats_fw_plus_version_tag 34
+#define meshtastic_NodeStats_wifi_rssi_tag       35
+#define meshtastic_NodeStats_wifi_drops_tag      36
+#define meshtastic_NodeStats_wifi_drop_reason_tag 37
 #define meshtastic_RxPacketHistory_rx_packet_history_tag 1
 #define meshtastic_RxAvgTimeHistory_rx_avg_history_tag 1
 #define meshtastic_PortCounterEntry_port_tag     1
@@ -449,7 +463,10 @@ X(a, STATIC,   OPTIONAL, UINT32,   flood_counter,    30) \
 X(a, STATIC,   OPTIONAL, UINT32,   nexthop_counter,  31) \
 X(a, STATIC,   OPTIONAL, STRING,   firmware_version,  32) \
 X(a, STATIC,   OPTIONAL, UINT32,   blocked_by_hoplimit,  33) \
-X(a, STATIC,   OPTIONAL, UINT32,   fw_plus_version,  34)
+X(a, STATIC,   OPTIONAL, UINT32,   fw_plus_version,  34) \
+X(a, STATIC,   OPTIONAL, INT32,    wifi_rssi,        35) \
+X(a, STATIC,   OPTIONAL, UINT32,   wifi_drops,       36) \
+X(a, STATIC,   OPTIONAL, UINT32,   wifi_drop_reason,  37)
 #define meshtastic_NodeStats_CALLBACK NULL
 #define meshtastic_NodeStats_DEFAULT NULL
 
@@ -645,7 +662,7 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_FwPlusVersion_size            6
 #define meshtastic_NodeEntry_size                69
 #define meshtastic_NodeStatsBroadcastConfig_size 8
-#define meshtastic_NodeStats_size                227
+#define meshtastic_NodeStats_size                253
 #define meshtastic_NodesList_size                710
 #define meshtastic_OnDemandRequest_size          12
 #define meshtastic_OnDemandResponse_size         715
