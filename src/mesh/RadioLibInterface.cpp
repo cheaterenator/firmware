@@ -61,6 +61,15 @@ RadioLibInterface::RadioLibInterface(LockingArduinoHal *hal, RADIOLIB_PIN_TYPE c
 {
     instance = this;
 
+#ifdef MESHTASTIC_RX_READOUT_TASK
+    // Before any sequence can start, not with the task in startReceive(): the first RadioSequence to wrap that call
+    // would otherwise have taken nothing (the mutex was still null), leaving it with held == false while the task it
+    // creates is already live and able to read out between the rest of that sequence's RadioLib calls.
+    radioSeqMutex = xSemaphoreCreateRecursiveMutex();
+    if (!radioSeqMutex)
+        LOG_ERROR("No radio sequence mutex, RX readout task will not start");
+#endif
+
     // Initialize unused sample slots to a sane default; sample count controls averaging.
     for (uint8_t i = 0; i < NOISE_FLOOR_SAMPLES; i++) {
         noiseFloorSamples[i] = NOISE_FLOOR_DEFAULT;
@@ -966,6 +975,9 @@ void RadioLibInterface::startReceive()
 void RadioLibInterface::pollMissedIrqs()
 {
     // RadioLibInterface::enableInterrupt uses EDGE-TRIGGERED interrupts. Poll as a backup to catch missed edges.
+    // The main loop's flag reads are a sequence too: an LR11x0/LR20x0 status read zeroes RadioLib's per-Module SPI widths
+    // for its transfer, so a readout landing inside one would take the chip's status bytes for the frame length.
+    RadioSequence seq(this);
     if (isReceiving) {
         checkRxDoneIrqFlag();
         checkCadHandoffTimeout();
@@ -1311,6 +1323,7 @@ bool RadioLibInterface::maybeRecoverChipStateLoss()
 void RadioLibInterface::clearReadIrqs()
 {
     iface->clearIrq((1UL << RADIOLIB_IRQ_RX_DONE) | (1UL << RADIOLIB_IRQ_CRC_ERR));
+    discardUnreadRxFrame();
 }
 
 bool RadioLibInterface::checkRxDoneIrqFlag()
@@ -1352,8 +1365,7 @@ void RadioLibInterface::unlockRadioSequence()
 void RadioLibInterface::startRxReadoutTask()
 {
     rxReadoutTaskTried = true;
-    // Before the task, so it can never run unguarded
-    radioSeqMutex = xSemaphoreCreateRecursiveMutex();
+    // Created in the constructor, so a sequence already in flight is holding it as the task appears
     if (!radioSeqMutex) {
         LOG_ERROR("RX readout task not started, no mutex");
         return;
