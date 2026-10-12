@@ -25,6 +25,12 @@
 #include "hal/gpio_ll.h"
 #include "soc/spi_periph.h"
 #ifdef HW_SPI1_DEVICE
+// Defined in main.cpp
+#if defined(HAS_SDCARD) && defined(SDCARD_USE_SPI1)
+extern SPIClass &SPI1; // alias for SPI_HSPI; both on SPI2_HOST
+#else
+extern SPIClass SPI1;
+#endif
 #define RADIO_SPI_BUS SPI1
 #else
 #define RADIO_SPI_BUS SPI
