@@ -1212,8 +1212,8 @@ void test_publishTextMessageWithProxy(void)
     TEST_ASSERT_EQUAL_STRING("payload", message.payload_variant.text);
 }
 
-// Helper method to verify the expected latitude/longitude was received.
-void verifyLatLong(const DecodedServiceEnvelope &env, uint32_t latitude, uint32_t longitude)
+// Helper method to verify the expected latitude/longitude and precision was received.
+void verifyLatLong(const DecodedServiceEnvelope &env, int32_t latitude, int32_t longitude, uint32_t precision)
 {
     TEST_ASSERT_TRUE(env.validDecode);
     const meshtastic_MeshPacket &p = *env.packet;
@@ -1224,8 +1224,9 @@ void verifyLatLong(const DecodedServiceEnvelope &env, uint32_t latitude, uint32_
     meshtastic_MapReport mapReport;
     TEST_ASSERT_TRUE(
         pb_decode_from_bytes(p.decoded.payload.bytes, p.decoded.payload.size, &meshtastic_MapReport_msg, &mapReport));
-    TEST_ASSERT_EQUAL(latitude, mapReport.latitude_i);
-    TEST_ASSERT_EQUAL(longitude, mapReport.longitude_i);
+    TEST_ASSERT_EQUAL_INT32(latitude, mapReport.latitude_i);
+    TEST_ASSERT_EQUAL_INT32(longitude, mapReport.longitude_i);
+    TEST_ASSERT_EQUAL_UINT32(precision, mapReport.position_precision);
 }
 
 // Map reporting defaults to an imprecise location.
@@ -1236,6 +1237,53 @@ void test_reportToMapDefaultImprecise(void)
     TEST_ASSERT_EQUAL(1, pubsub->published_.size());
     const auto &[topic, payload] = pubsub->published_.front();
     TEST_ASSERT_EQUAL_STRING("msh/2/map/", topic.c_str());
+}
+
+// Imprecise map reports are truncated to the grid and centered in the cell.
+void test_reportToMapImpreciseCentered(void)
+{
+    unitTest->reportToMap(/*precision=*/14);
+
+    TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+    const auto &[topic, payload] = pubsub->published_.front();
+    verifyLatLong(std::get<DecodedServiceEnvelope>(payload), 700055552, 300023808, 14);
+}
+
+// Full precision publishes the exact position. The half-cell offset used to be 1 << (31 - 32), which on
+// ESP32 flipped the sign bit and moved 50.804461N 20.448605E to 163.943903S 194.299760W.
+void test_reportToMapFullPrecisionUnchanged(void)
+{
+    localPosition.latitude_i = 508044610;
+    localPosition.longitude_i = 204486050;
+
+    unitTest->reportToMap(/*precision=*/32);
+
+    TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+    const auto &[topic, payload] = pubsub->published_.front();
+    verifyLatLong(std::get<DecodedServiceEnvelope>(payload), 508044610, 204486050, 32);
+}
+
+// Full precision keeps southern and western coordinates exact too.
+void test_reportToMapFullPrecisionNegativeUnchanged(void)
+{
+    localPosition.latitude_i = -338688000;
+    localPosition.longitude_i = -1512093000;
+
+    unitTest->reportToMap(/*precision=*/32);
+
+    TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+    const auto &[topic, payload] = pubsub->published_.front();
+    verifyLatLong(std::get<DecodedServiceEnvelope>(payload), -338688000, -1512093000, 32);
+}
+
+// A precision above 32 bits is clamped to full precision rather than the imprecise default.
+void test_reportToMapPrecisionAbove32ClampsToFull(void)
+{
+    unitTest->reportToMap(/*precision=*/40);
+
+    TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+    const auto &[topic, payload] = pubsub->published_.front();
+    verifyLatLong(std::get<DecodedServiceEnvelope>(payload), 700000000, 300000000, 32);
 }
 
 void test_eventPrimaryMapReportFollowsCompileTimePolicy(void)
@@ -1617,6 +1665,10 @@ void setup()
     RUN_TEST(test_publishTextMessageDirect);
     RUN_TEST(test_publishTextMessageWithProxy);
     RUN_TEST(test_reportToMapDefaultImprecise);
+    RUN_TEST(test_reportToMapImpreciseCentered);
+    RUN_TEST(test_reportToMapFullPrecisionUnchanged);
+    RUN_TEST(test_reportToMapFullPrecisionNegativeUnchanged);
+    RUN_TEST(test_reportToMapPrecisionAbove32ClampsToFull);
     RUN_TEST(test_eventPrimaryMapReportFollowsCompileTimePolicy);
     RUN_TEST(test_privatePrimaryMapReportStillPublishesWithEventPolicy);
     RUN_TEST(test_reportToMapImpreciseProxied);

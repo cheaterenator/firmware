@@ -8,6 +8,7 @@
 #include "main.h"
 #include "mesh/Channels.h"
 #include "mesh/CryptoEngine.h"
+#include "mesh/PositionPrecision.h"
 #include "mesh/Router.h"
 #include "mesh/generated/meshtastic/mqtt.pb.h"
 #include "mesh/generated/meshtastic/telemetry.pb.h"
@@ -856,10 +857,14 @@ void MQTT::perhapsReportToMap()
 
     // Coerce the map position precision to be within the valid range
     // This removes obtusely large radius and privacy problematic ones from the map
-    if (map_position_precision < 12 || map_position_precision > 40) {
+    if (map_position_precision < 12) {
         LOG_WARN("MQTT Map report position precision %u out of range, use default %u", map_position_precision,
                  default_map_position_precision);
         map_position_precision = default_map_position_precision;
+    } else if (map_position_precision > 32) {
+        // A coordinate has only 32 bits; anything above means full precision
+        LOG_WARN("MQTT Map report position precision %u out of range, use 32", map_position_precision);
+        map_position_precision = 32;
     }
 
     if (Throttle::isWithinTimespanMs(last_report_to_map, map_publish_interval_msecs) && last_report_to_map != 0)
@@ -896,11 +901,10 @@ void MQTT::perhapsReportToMap()
     mapReport.has_default_channel = channels.hasDefaultChannel();
     mapReport.has_opted_report_location = true;
 
-    // Set position with precision (same as in PositionModule)
-    mapReport.latitude_i = localPosition.latitude_i & (UINT32_MAX << (32 - map_position_precision));
-    mapReport.longitude_i = localPosition.longitude_i & (UINT32_MAX << (32 - map_position_precision));
-    mapReport.latitude_i += (1 << (31 - map_position_precision));
-    mapReport.longitude_i += (1 << (31 - map_position_precision));
+    // Set position with precision (same as in PositionModule). Precision 32 is passed through unchanged:
+    // the half-cell offset there would be 1 << -1 (UB, 1 << 31 on ESP32) and flip the sign bit.
+    mapReport.latitude_i = truncateCoordinate(localPosition.latitude_i, map_position_precision);
+    mapReport.longitude_i = truncateCoordinate(localPosition.longitude_i, map_position_precision);
 
     mapReport.altitude = localPosition.altitude;
     mapReport.position_precision = map_position_precision;
