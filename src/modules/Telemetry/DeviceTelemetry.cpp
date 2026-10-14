@@ -103,7 +103,7 @@ meshtastic_Telemetry DeviceTelemetryModule::getDeviceTelemetry()
 {
     meshtastic_Telemetry t = meshtastic_Telemetry_init_zero;
     t.which_variant = meshtastic_Telemetry_device_metrics_tag;
-    t.time = getTime();
+    t.time = getValidTime(RTCQualityFromNet); // 0 (field omitted) until the clock is set, never a boot-relative 1970 time
     t.variant.device_metrics = meshtastic_DeviceMetrics_init_zero;
     t.variant.device_metrics.has_air_util_tx = true;
     t.variant.device_metrics.has_battery_level = true;
@@ -131,7 +131,7 @@ meshtastic_Telemetry DeviceTelemetryModule::getLocalStatsTelemetry()
     meshtastic_Telemetry telemetry = meshtastic_Telemetry_init_zero;
     telemetry.which_variant = meshtastic_Telemetry_local_stats_tag;
     telemetry.variant.local_stats = meshtastic_LocalStats_init_zero;
-    telemetry.time = getTime();
+    telemetry.time = getValidTime(RTCQualityFromNet);
     telemetry.variant.local_stats.uptime_seconds = Time::getUptimeSecs();
     telemetry.variant.local_stats.channel_utilization = airTime->channelUtilizationPercent();
     telemetry.variant.local_stats.air_util_tx = airTime->utilizationTXPercent();
@@ -182,7 +182,7 @@ meshtastic_Telemetry DeviceTelemetryModule::getLocalStatsExtendedTelemetry()
     meshtastic_Telemetry telemetry = meshtastic_Telemetry_init_zero;
     telemetry.which_variant = meshtastic_Telemetry_local_stats_extended_tag;
     telemetry.variant.local_stats_extended = meshtastic_LocalStatsExtended_init_zero;
-    telemetry.time = getTime();
+    telemetry.time = getValidTime(RTCQualityFromNet);
 
     #if defined(ARCH_ESP32)
         telemetry.variant.local_stats_extended.memory_free_cheap = memGet.getFreeHeap();

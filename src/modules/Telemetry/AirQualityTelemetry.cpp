@@ -429,7 +429,7 @@ bool AirQualityTelemetryModule::getAirQualityTelemetry(meshtastic_Telemetry *m)
     // There, if any sensor fails to read - valid = false.
     bool valid = false;
     bool hasSensor = false;
-    m->time = getTime();
+    m->time = getValidTime(RTCQualityFromNet); // 0 (field omitted) until the clock is set, never a boot-relative 1970 time
     m->which_variant = meshtastic_Telemetry_air_quality_metrics_tag;
     m->variant.air_quality_metrics = meshtastic_AirQualityMetrics_init_zero;
 
@@ -481,7 +481,7 @@ bool AirQualityTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
 {
     meshtastic_Telemetry m = meshtastic_Telemetry_init_zero;
     m.which_variant = meshtastic_Telemetry_air_quality_metrics_tag;
-    m.time = getTime();
+    m.time = getValidTime(RTCQualityFromNet);
 
     bool validTelemetry = getAirQualityTelemetry(&m);
     if (validTelemetry) {

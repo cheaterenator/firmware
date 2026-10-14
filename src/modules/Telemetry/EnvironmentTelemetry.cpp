@@ -704,7 +704,7 @@ bool EnvironmentTelemetryModule::getEnvironmentTelemetry(meshtastic_Telemetry *m
     // getMetrics() doesn't always get evaluated because of
     // short-circuit evaluation rules in c++
     bool get_metrics;
-    m->time = getTime();
+    m->time = getValidTime(RTCQualityFromNet); // 0 (field omitted) until the clock is set, never a boot-relative 1970 time
     m->which_variant = meshtastic_Telemetry_environment_metrics_tag;
     m->variant.environment_metrics = meshtastic_EnvironmentMetrics_init_zero;
 
@@ -792,7 +792,7 @@ bool EnvironmentTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
 {
     meshtastic_Telemetry m = meshtastic_Telemetry_init_zero;
     m.which_variant = meshtastic_Telemetry_environment_metrics_tag;
-    m.time = getTime();
+    m.time = getValidTime(RTCQualityFromNet);
 
     bool validTelemetry = getEnvironmentTelemetry(&m);
 

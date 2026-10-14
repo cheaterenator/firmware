@@ -191,7 +191,7 @@ bool HealthTelemetryModule::getHealthTelemetry(meshtastic_Telemetry *m)
     bool valid = false;
     bool hasSensor = false;
     bool get_metrics;
-    m->time = getTime();
+    m->time = getValidTime(RTCQualityFromNet); // 0 (field omitted) until the clock is set, never a boot-relative 1970 time
     m->which_variant = meshtastic_Telemetry_health_metrics_tag;
     m->variant.health_metrics = meshtastic_HealthMetrics_init_zero;
 
@@ -245,7 +245,7 @@ bool HealthTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
 {
     meshtastic_Telemetry m = meshtastic_Telemetry_init_zero;
     m.which_variant = meshtastic_Telemetry_health_metrics_tag;
-    m.time = getTime();
+    m.time = getValidTime(RTCQualityFromNet);
     bool validTelemetry = getHealthTelemetry(&m);
     if (validTelemetry) {
         LOG_INFO("Send: temperature=%f, heart_bpm=%d, spO2=%d", m.variant.health_metrics.temperature,

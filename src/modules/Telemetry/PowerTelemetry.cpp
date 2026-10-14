@@ -213,7 +213,7 @@ bool PowerTelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &m
 bool PowerTelemetryModule::getPowerTelemetry(meshtastic_Telemetry *m)
 {
     bool valid = false;
-    m->time = getTime();
+    m->time = getValidTime(RTCQualityFromNet); // 0 (field omitted) until the clock is set, never a boot-relative 1970 time
     m->which_variant = meshtastic_Telemetry_power_metrics_tag;
 
     m->variant.power_metrics = meshtastic_PowerMetrics_init_zero;
@@ -270,7 +270,7 @@ bool PowerTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
 {
     meshtastic_Telemetry m = meshtastic_Telemetry_init_zero;
     m.which_variant = meshtastic_Telemetry_power_metrics_tag;
-    m.time = getTime();
+    m.time = getValidTime(RTCQualityFromNet);
     bool validTelemetry = getPowerTelemetry(&m);
     if (validTelemetry) {
         LOG_INFO("Send: ch1_voltage=%f, ch2_voltage=%f, ch3_voltage=%f", m.variant.power_metrics.ch1_voltage,
