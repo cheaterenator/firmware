@@ -106,6 +106,56 @@ static void test_sendToPhone_sentAtTimeZeroStillHoldsCadence()
     TEST_ASSERT_TRUE(PositionModule::shouldSendPositionToPhone(true, true, true, 60000U, 0U, 60000U));
 }
 
+// Mesh time from GPS- or phone-sourced positions is trusted regardless of the fixed-position pref.
+static void test_meshTime_gpsAndPhoneSourcesAlwaysTrusted()
+{
+    TEST_ASSERT_TRUE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_INTERNAL, false));
+    TEST_ASSERT_TRUE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_EXTERNAL, false));
+    TEST_ASSERT_TRUE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_INTERNAL, true));
+    TEST_ASSERT_TRUE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_EXTERNAL, true));
+}
+
+// Upstream default: a fixed-position sender (e.g. an NTP-synced gateway) never sets our clock.
+static void test_meshTime_fixedSourceRejectedByDefault()
+{
+    TEST_ASSERT_FALSE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_MANUAL, false));
+}
+
+// USERPREFS_MESH_TIME_RELAXED opts fixed-position senders in.
+static void test_meshTime_fixedSourceAcceptedWhenOptedIn()
+{
+    TEST_ASSERT_TRUE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_MANUAL, true));
+}
+
+// An unset source says nothing about the sender's clock, so the opt-in does not cover it.
+static void test_meshTime_unsetSourceNeverTrusted()
+{
+    TEST_ASSERT_FALSE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_UNSET, false));
+    TEST_ASSERT_FALSE(PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource_LOC_UNSET, true));
+}
+
+// The primary channel carries usable mesh time whatever its key and the pref.
+static void test_meshTimeChannel_primaryAlwaysTrusted()
+{
+    TEST_ASSERT_TRUE(PositionModule::meshTimeChannelTrusted(true, true, false));
+    TEST_ASSERT_TRUE(PositionModule::meshTimeChannelTrusted(true, false, false));
+    TEST_ASSERT_TRUE(PositionModule::meshTimeChannelTrusted(true, true, true));
+}
+
+// Upstream default: no secondary channel sets our clock, private key or not.
+static void test_meshTimeChannel_secondaryRejectedByDefault()
+{
+    TEST_ASSERT_FALSE(PositionModule::meshTimeChannelTrusted(false, false, false));
+    TEST_ASSERT_FALSE(PositionModule::meshTimeChannelTrusted(false, true, false));
+}
+
+// USERPREFS_MESH_TIME_RELAXED admits a secondary channel only when its key is private.
+static void test_meshTimeChannel_privateSecondaryAcceptedWhenOptedIn()
+{
+    TEST_ASSERT_TRUE(PositionModule::meshTimeChannelTrusted(false, false, true));
+    TEST_ASSERT_FALSE(PositionModule::meshTimeChannelTrusted(false, true, true));
+}
+
 void setUp(void) {}
 
 void tearDown(void) {}
@@ -131,6 +181,13 @@ void setup()
     RUN_TEST(test_sendToPhone_requiresIdlePhoneQueue);
     RUN_TEST(test_sendToPhone_survivesMillisRollover);
     RUN_TEST(test_sendToPhone_sentAtTimeZeroStillHoldsCadence);
+    RUN_TEST(test_meshTime_gpsAndPhoneSourcesAlwaysTrusted);
+    RUN_TEST(test_meshTime_fixedSourceRejectedByDefault);
+    RUN_TEST(test_meshTime_fixedSourceAcceptedWhenOptedIn);
+    RUN_TEST(test_meshTime_unsetSourceNeverTrusted);
+    RUN_TEST(test_meshTimeChannel_primaryAlwaysTrusted);
+    RUN_TEST(test_meshTimeChannel_secondaryRejectedByDefault);
+    RUN_TEST(test_meshTimeChannel_privateSecondaryAcceptedWhenOptedIn);
     exit(UNITY_END());
 }
 

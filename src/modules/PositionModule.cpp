@@ -22,6 +22,12 @@
 #include "target_specific.h"
 #include <Throttle.h>
 
+// Fork: also take mesh time from fixed-position senders and private secondary channels
+// (see meshTimeSourceTrusted() and meshTimeChannelTrusted()).
+#ifndef USERPREFS_MESH_TIME_RELAXED
+#define USERPREFS_MESH_TIME_RELAXED false
+#endif
+
 PositionModule *positionModule;
 
 PositionModule::PositionModule()
@@ -104,7 +110,8 @@ bool PositionModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
               p.altitude_geoidal_separation, p.PDOP, p.HDOP, p.VDOP, p.sats_in_view, p.fix_quality, p.fix_type, p.timestamp,
               p.time);
 
-    if (p.time && channels.getByIndex(mp.channel).role == meshtastic_Channel_Role_PRIMARY) {
+    if (p.time && meshTimeChannelTrusted(channels.getByIndex(mp.channel).role == meshtastic_Channel_Role_PRIMARY,
+                                         channels.usesPublicKey(mp.channel), USERPREFS_MESH_TIME_RELAXED)) {
         bool force = false;
 
 #ifdef T_WATCH_S3
@@ -148,7 +155,7 @@ void PositionModule::trySetRtc(meshtastic_Position p, bool isLocal, bool forceUp
         LOG_DEBUG("Ignore time from mesh: GPS/RTC/Phone/NTP time source in past day");
         return;
     }
-    if (!isLocal && p.location_source < meshtastic_Position_LocSource_LOC_INTERNAL) {
+    if (!isLocal && !meshTimeSourceTrusted(p.location_source, USERPREFS_MESH_TIME_RELAXED)) {
         LOG_DEBUG("Ignore time from mesh: unknown or manual source");
         return;
     }
@@ -542,6 +549,18 @@ uint32_t PositionModule::effectiveBroadcastIntervalMs(uint32_t configuredInterva
     if (stationary && stationaryFloorMs > configuredIntervalMs)
         return stationaryFloorMs;
     return configuredIntervalMs;
+}
+
+bool PositionModule::meshTimeSourceTrusted(meshtastic_Position_LocSource source, bool acceptFixed)
+{
+    if (source >= meshtastic_Position_LocSource_LOC_INTERNAL)
+        return true;
+    return acceptFixed && source == meshtastic_Position_LocSource_LOC_MANUAL;
+}
+
+bool PositionModule::meshTimeChannelTrusted(bool isPrimary, bool usesPublicKey, bool acceptPrivateSecondary)
+{
+    return isPrimary || (acceptPrivateSecondary && !usesPublicKey);
 }
 
 int32_t PositionModule::runOnce()

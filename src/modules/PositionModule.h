@@ -58,6 +58,15 @@ class PositionModule : public ProtobufModule<meshtastic_Position>, private concu
     // still honors the cadence.
     static bool shouldSendPositionToPhone(bool hasValidPosition, bool phoneQueueEmpty, bool everSentToPhone, uint32_t nowMs,
                                           uint32_t lastSentMs, uint32_t intervalMs);
+    // Pure mesh-time policy: may a remote position's time set our clock, given where the sender's
+    // position came from? GPS/phone sources always qualify. A fixed (manual) position qualifies only
+    // with acceptFixed: its sender includes time only at NTP/GPS/phone quality (or from an RTC chip),
+    // so a Wi-Fi gateway with NTP can then seed the clocks of field nodes that have no other source.
+    static bool meshTimeSourceTrusted(meshtastic_Position_LocSource source, bool acceptFixed);
+    // Pure mesh-time policy for the channel a position arrived on: the primary channel always. With
+    // acceptPrivateSecondary, also a secondary channel whose key is not publicly decryptable - a network
+    // that shares positions only on its own private channel would otherwise never hear a usable time.
+    static bool meshTimeChannelTrusted(bool isPrimary, bool usesPublicKey, bool acceptPrivateSecondary);
 
   protected:
     /** Called to handle a particular incoming message
