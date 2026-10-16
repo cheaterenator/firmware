@@ -3713,9 +3713,11 @@ void NodeDB::updatePosition(uint32_t nodeId, const meshtastic_Position &p, RxSou
 
             setLocalPosition(p);
             slot = TypeConversions::ConvertToPositionLite(p);
-        } else if ((p.time > 0) && !p.latitude_i && !p.longitude_i && !p.timestamp && !p.location_source) {
+        } else if ((p.time > 0) && !p.latitude_i && !p.longitude_i && !p.timestamp) {
             // FIXME SPECIAL TIME SETTING PACKET FROM EUD TO RADIO
             // (stop-gap fix for issue #900)
+            // Fork: a set location_source no longer disqualifies it - a time beacon carries one (so stock
+            // nodes take its time) but no coordinates, and must not blank the sender's known position.
             LOG_DEBUG("updatePosition SPECIAL time setting time=%u", p.time);
             slot.time = p.time;
         } else {

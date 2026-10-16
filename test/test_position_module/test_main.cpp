@@ -156,6 +156,49 @@ static void test_meshTimeChannel_privateSecondaryAcceptedWhenOptedIn()
     TEST_ASSERT_FALSE(PositionModule::meshTimeChannelTrusted(false, true, true));
 }
 
+// Time beacon (USERPREFS_TIME_BEACON_SECS): off at interval 0, whatever else holds.
+static void test_timeBeacon_offWhenIntervalZero()
+{
+    TEST_ASSERT_FALSE(PositionModule::shouldSendTimeBeacon(0U, true, false, 5000U, 0U));
+}
+
+// A stale clock (no NTP/GPS/phone set in the past day) never vouches for the mesh.
+static void test_timeBeacon_requiresFreshClock()
+{
+    TEST_ASSERT_FALSE(PositionModule::shouldSendTimeBeacon(3600000U, false, false, 5000U, 0U));
+    TEST_ASSERT_FALSE(PositionModule::shouldSendTimeBeacon(3600000U, false, true, 9000000U, 0U));
+}
+
+// The first beacon goes out as soon as the clock is fresh; later ones hold to the cadence.
+static void test_timeBeacon_firstIsImmediateThenHoldsCadence()
+{
+    TEST_ASSERT_TRUE(PositionModule::shouldSendTimeBeacon(3600000U, true, false, 0U, 0U));
+    TEST_ASSERT_FALSE(PositionModule::shouldSendTimeBeacon(3600000U, true, true, 3600000U, 1U));
+    TEST_ASSERT_TRUE(PositionModule::shouldSendTimeBeacon(3600000U, true, true, 3600001U, 1U));
+}
+
+static void test_timeBeacon_survivesMillisRollover()
+{
+    constexpr uint32_t lastSent = UINT32_MAX - 999U; // 1,000 ms before the wrap to 0
+    TEST_ASSERT_TRUE(PositionModule::shouldSendTimeBeacon(3600000U, true, true, 3599000U, lastSent));
+    TEST_ASSERT_FALSE(PositionModule::shouldSendTimeBeacon(3600000U, true, true, 3598999U, lastSent));
+}
+
+// The payload is our time with a source stock firmware trusts, and nothing that locates us.
+static void test_timeBeacon_payloadIsTimeAndExternalSourceOnly()
+{
+    meshtastic_Position p = PositionModule::makeTimeBeacon(1790000000U);
+    TEST_ASSERT_EQUAL_UINT32(1790000000U, p.time);
+    TEST_ASSERT_EQUAL(meshtastic_Position_LocSource_LOC_EXTERNAL, p.location_source);
+    TEST_ASSERT_TRUE(PositionModule::meshTimeSourceTrusted(p.location_source, false));
+    TEST_ASSERT_FALSE(p.has_latitude_i);
+    TEST_ASSERT_FALSE(p.has_longitude_i);
+    TEST_ASSERT_FALSE(p.has_altitude);
+    TEST_ASSERT_EQUAL_INT32(0, p.latitude_i);
+    TEST_ASSERT_EQUAL_INT32(0, p.longitude_i);
+    TEST_ASSERT_EQUAL_UINT32(0, p.timestamp);
+}
+
 void setUp(void) {}
 
 void tearDown(void) {}
@@ -188,6 +231,11 @@ void setup()
     RUN_TEST(test_meshTimeChannel_primaryAlwaysTrusted);
     RUN_TEST(test_meshTimeChannel_secondaryRejectedByDefault);
     RUN_TEST(test_meshTimeChannel_privateSecondaryAcceptedWhenOptedIn);
+    RUN_TEST(test_timeBeacon_offWhenIntervalZero);
+    RUN_TEST(test_timeBeacon_requiresFreshClock);
+    RUN_TEST(test_timeBeacon_firstIsImmediateThenHoldsCadence);
+    RUN_TEST(test_timeBeacon_survivesMillisRollover);
+    RUN_TEST(test_timeBeacon_payloadIsTimeAndExternalSourceOnly);
     exit(UNITY_END());
 }
 

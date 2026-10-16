@@ -28,6 +28,14 @@
 #define USERPREFS_MESH_TIME_RELAXED false
 #endif
 
+// Fork, experimental: every N seconds while our clock is NTP/GPS/phone-fresh, broadcast a time-only
+// position that stock nodes accept as a time source (see sendTimeBeacon()). 0 = off.
+#ifndef USERPREFS_TIME_BEACON_SECS
+#define USERPREFS_TIME_BEACON_SECS 0
+#endif
+static_assert(USERPREFS_TIME_BEACON_SECS == 0 || USERPREFS_TIME_BEACON_SECS >= 300,
+              "USERPREFS_TIME_BEACON_SECS must be 0 (off) or at least 300");
+
 PositionModule *positionModule;
 
 PositionModule::PositionModule()
@@ -71,6 +79,14 @@ bool PositionModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
                                     meshtastic_MeshPacket_TransportMechanism_TRANSPORT_API)) {
         LOG_WARN("Ignoring packet supposedly from us over external transport");
         return true;
+    }
+
+    // Our own time beacon looping back (sendLocal delivers broadcasts locally too). It has no position
+    // to store, and its time came from our own clock: re-applying it would also refresh
+    // lastSetFromPhoneNtpOrGps, so the beacon would vouch for itself once NTP stops answering.
+    if (timeBeaconPacketId != 0 && isFromUs(&mp) && mp.id == timeBeaconPacketId) {
+        precision = getPositionPrecisionForChannel(mp.channel); // for alterReceivedProtobuf(), as below
+        return false;
     }
 
     // FIXME this can in fact happen with packets sent from EUD (src=RX_SRC_USER)
@@ -563,6 +579,51 @@ bool PositionModule::meshTimeChannelTrusted(bool isPrimary, bool usesPublicKey, 
     return isPrimary || (acceptPrivateSecondary && !usesPublicKey);
 }
 
+bool PositionModule::shouldSendTimeBeacon(uint32_t intervalMs, bool clockFresh, bool everSent, uint32_t nowMs,
+                                          uint32_t lastSentMs)
+{
+    if (intervalMs == 0 || !clockFresh)
+        return false;
+    return !everSent || (nowMs - lastSentMs) >= intervalMs;
+}
+
+meshtastic_Position PositionModule::makeTimeBeacon(uint32_t time)
+{
+    meshtastic_Position p = meshtastic_Position_init_default;
+    p.time = time;
+    p.location_source = meshtastic_Position_LocSource_LOC_EXTERNAL;
+    return p;
+}
+
+// Fork, experimental: stock firmware takes mesh time only from positions on the primary channel whose
+// source is GPS or phone, and once per boot. Our positions are fixed (LOC_MANUAL) and go out on a
+// private secondary, so they never qualify. This beacon does: primary channel, LOC_EXTERNAL, our time,
+// and no coordinates - it shares no location, whatever the primary channel's precision.
+bool PositionModule::sendTimeBeacon()
+{
+    const uint32_t time = getValidTime(RTCQualityNTP);
+    if (time == 0)
+        return false;
+
+    meshtastic_MeshPacket *p = allocDataProtobuf(makeTimeBeacon(time));
+    if (p == nullptr)
+        return false;
+
+    p->to = NODENUM_BROADCAST;
+    p->channel = 0;
+    p->decoded.want_response = false;
+    p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
+    timeBeaconPacketId = p->id;
+
+    LOG_INFO("Send time beacon %u on the primary channel", time);
+    ErrorCode res = service->sendToMesh(p, RX_SRC_LOCAL, true);
+    if (res != ERRNO_OK && res != ERRNO_SHOULD_RELEASE) {
+        LOG_WARN("Time beacon rejected by router: 0x%x", res);
+        return false;
+    }
+    return true;
+}
+
 int32_t PositionModule::runOnce()
 {
     if (sleepOnNextExecution == true) {
@@ -597,6 +658,17 @@ int32_t PositionModule::runOnce()
     if (!airTime->isTxAllowedChannelUtil(config.device.role != meshtastic_Config_DeviceConfig_Role_TRACKER &&
                                          config.device.role != meshtastic_Config_DeviceConfig_Role_TAK_TRACKER)) {
         return RUNONCE_INTERVAL;
+    }
+
+    // Vouch for our clock only while a real source set it within the past day (NTP refreshes every 12 h):
+    // stock nodes keep the first mesh time they take until they reboot.
+    const bool clockFresh = lastSetFromPhoneNtpOrGps != 0 &&
+                            Throttle::isWithinTimespanMs(lastSetFromPhoneNtpOrGps, SEC_PER_DAY * 1000UL) &&
+                            getValidTime(RTCQualityNTP) > 0;
+    if (shouldSendTimeBeacon(USERPREFS_TIME_BEACON_SECS * 1000UL, clockFresh, hasSentTimeBeacon, now, lastTimeBeaconMs) &&
+        sendTimeBeacon()) {
+        hasSentTimeBeacon = true;
+        lastTimeBeaconMs = now;
     }
 
     // Hold to the 6h floor when fixed_position (every role: pinning yourself forfeits the

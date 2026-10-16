@@ -25,6 +25,9 @@ bool findPositionChannel(uint8_t &channelIndex);
 // The return is the coordinate (int32_t); the uint8_t overload only narrows the precision arg.
 int32_t truncateCoordinate(int32_t coordinate, uint32_t precision);
 int32_t truncateCoordinate(int32_t coordinate, uint8_t precision);
+// True when the position carries any coordinate (lat, lon or altitude). Time-only positions don't, and
+// applyPositionPrecision() leaves them untouched.
+bool positionHasLocation(const meshtastic_Position &position);
 void applyPositionPrecision(meshtastic_Position &position, uint32_t precision);
 bool applyPositionPrecision(meshtastic_MeshPacket &packet, uint32_t precision);
 bool applyPositionPrecisionForChannel(meshtastic_MeshPacket &packet, uint8_t channelIndex);

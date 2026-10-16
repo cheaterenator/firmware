@@ -124,6 +124,7 @@
   // "USERPREFS_PHONEAPI_REPLAY_TYPES": "0x1", // Cached records replayed to the app after sync: bit 0 position, 1 device telemetry, 2 environment, 3 status; 0 = none (default 0xF)
   // "USERPREFS_PHONEAPI_REPLAY_MAX_AGE_SECS": "7200", // Replay only records of nodes heard within this many seconds; nothing is replayed while the node has no clock (default: no limit)
   // "USERPREFS_MESH_TIME_RELAXED": "true", // Also set the clock from fixed-position senders (e.g. a gateway with NTP) and on private-key secondary channels; default: GPS/phone positions on the primary channel only
+  // "USERPREFS_TIME_BEACON_SECS": "3600", // Experimental: while the clock is fresh from NTP/GPS/phone, broadcast a time-only position (LOC_EXTERNAL, no coordinates) on the primary channel every N s, so stock nodes set their clocks from it; 0 = off (default), min 300
   // "USERPREFS_XEDDSA_SIGN_LEGACY": "true", // Sign in the legacy pre-#11422 layout instead of the v1 whole-envelope one, for peers that verify only legacy; both layouts are always accepted
   // "USERPREFS_UI_TEST_LOG": "true", // Test-only: emits `Screen: frame N/M name=... reason=...` log per UI transition (for the meshtastic-mcp ui test tier); off in release builds.
   "USERPREFS_RINGTONE_RTTTL": "24:d=32,o=5,b=565:f6,p,f6,4p,p,f6,p,f6,2p,p,b6,p,b6,p,b6,p,b6,p,b,p,b,p,b,p,b,p,b,p,b,p,b,p,b,1p.,2p.,p",

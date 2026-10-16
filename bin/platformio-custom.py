@@ -310,6 +310,12 @@ if exists(localPrefsLoc):
     localPrefs = readUserPrefs(localPrefsLoc)
     userPrefs.update(localPrefs)
     print(f"userPrefs.local.jsonc overrides {len(localPrefs)} userPrefs")
+# Private per-env settings (gitignored), layered last: userPrefs.local.<env>.jsonc, e.g. for one device's build.
+envPrefsName = f"userPrefs.local.{env.get('PIOENV')}.jsonc"
+if exists(env["PROJECT_DIR"] + "/" + envPrefsName):
+    envPrefs = readUserPrefs(env["PROJECT_DIR"] + "/" + envPrefsName)
+    userPrefs.update(envPrefs)
+    print(f"{envPrefsName} overrides {len(envPrefs)} userPrefs")
 
 # Channels::initDefaultChannel() applies a configured index as a whole, so resolve per-field
 # optionality here: any field the vendor left out gets the value that function would have kept.

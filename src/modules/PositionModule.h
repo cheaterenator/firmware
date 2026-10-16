@@ -67,6 +67,12 @@ class PositionModule : public ProtobufModule<meshtastic_Position>, private concu
     // acceptPrivateSecondary, also a secondary channel whose key is not publicly decryptable - a network
     // that shares positions only on its own private channel would otherwise never hear a usable time.
     static bool meshTimeChannelTrusted(bool isPrimary, bool usesPublicKey, bool acceptPrivateSecondary);
+    // Pure time-beacon policy (USERPREFS_TIME_BEACON_SECS): send when the beacon is on (intervalMs > 0),
+    // our clock is fresh from NTP/GPS/phone, and the cadence has elapsed - at once for the first one.
+    static bool shouldSendTimeBeacon(uint32_t intervalMs, bool clockFresh, bool everSent, uint32_t nowMs, uint32_t lastSentMs);
+    // The time beacon's payload: our time and LOC_EXTERNAL, no coordinates. The source is what makes
+    // stock firmware take the time.
+    static meshtastic_Position makeTimeBeacon(uint32_t time);
 
   protected:
     /** Called to handle a particular incoming message
@@ -110,6 +116,11 @@ class PositionModule : public ProtobufModule<meshtastic_Position>, private concu
     bool hasQualityTimesource();
     bool hasGPS();
     uint32_t lastSentReply = 0; // Last time we sent a position reply (used for reply throttling only)
+    // Time beacon (USERPREFS_TIME_BEACON_SECS). The packet id tells its local loopback apart.
+    bool sendTimeBeacon();
+    PacketId timeBeaconPacketId = 0;
+    bool hasSentTimeBeacon = false;
+    uint32_t lastTimeBeaconMs = 0;
 
 #if USERPREFS_EVENT_MODE
     // In event mode we want to prevent excessive position broadcasts

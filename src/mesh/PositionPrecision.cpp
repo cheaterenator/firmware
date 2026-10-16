@@ -62,8 +62,20 @@ int32_t truncateCoordinate(int32_t coordinate, uint8_t precision)
     return truncateCoordinate(coordinate, static_cast<uint32_t>(precision));
 }
 
+bool positionHasLocation(const meshtastic_Position &position)
+{
+    return position.has_latitude_i || position.has_longitude_i || position.latitude_i != 0 || position.longitude_i != 0 ||
+           position.has_altitude || position.has_altitude_hae;
+}
+
 void applyPositionPrecision(meshtastic_Position &position, uint32_t precision)
 {
+    // Fork: a position without coordinates (a time-only packet, e.g. the time beacon) has no location
+    // to scrub or truncate. Truncation would invent a cell-center coordinate near 0,0, and scrubbing
+    // would drop the location_source that other nodes check before taking its time.
+    if (!positionHasLocation(position))
+        return;
+
     if (precision == 0) {
         uint32_t time = position.time;
         position = meshtastic_Position_init_default;

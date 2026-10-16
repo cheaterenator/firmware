@@ -76,6 +76,79 @@ static void test_applyPositionPrecision_zeroScrubsLocationButKeepsTime()
     TEST_ASSERT_EQUAL_UINT32(0, position.precision_bits);
 }
 
+static meshtastic_Position makeTimeOnlyPosition()
+{
+    meshtastic_Position position = meshtastic_Position_init_default;
+    position.time = 1790000000;
+    position.location_source = meshtastic_Position_LocSource_LOC_EXTERNAL;
+    return position;
+}
+
+static void test_positionHasLocation_anyCoordinateCounts()
+{
+    TEST_ASSERT_TRUE(positionHasLocation(makePosition()));
+    TEST_ASSERT_FALSE(positionHasLocation(makeTimeOnlyPosition()));
+
+    meshtastic_Position altitudeOnly = makeTimeOnlyPosition();
+    altitudeOnly.has_altitude = true;
+    TEST_ASSERT_TRUE(positionHasLocation(altitudeOnly));
+
+    // A coordinate set in code without its has_ flag still counts.
+    meshtastic_Position latOnly = makeTimeOnlyPosition();
+    latOnly.latitude_i = 1;
+    TEST_ASSERT_TRUE(positionHasLocation(latOnly));
+}
+
+// A time-only position (the time beacon) keeps its location_source at precision 0 - the field that
+// makes stock nodes take its time - since there is no location to scrub.
+static void test_applyPositionPrecision_zeroKeepsTimeOnlySource()
+{
+    meshtastic_Position position = makeTimeOnlyPosition();
+
+    applyPositionPrecision(position, 0);
+
+    TEST_ASSERT_EQUAL_UINT32(1790000000, position.time);
+    TEST_ASSERT_EQUAL(meshtastic_Position_LocSource_LOC_EXTERNAL, position.location_source);
+    TEST_ASSERT_FALSE(position.has_latitude_i);
+    TEST_ASSERT_FALSE(position.has_longitude_i);
+}
+
+// Truncating absent coordinates would invent a cell-center position near 0,0.
+static void test_applyPositionPrecision_coarseDoesNotInventCoordinates()
+{
+    meshtastic_Position position = makeTimeOnlyPosition();
+
+    applyPositionPrecision(position, 13);
+
+    TEST_ASSERT_FALSE(position.has_latitude_i);
+    TEST_ASSERT_EQUAL_INT32(0, position.latitude_i);
+    TEST_ASSERT_FALSE(position.has_longitude_i);
+    TEST_ASSERT_EQUAL_INT32(0, position.longitude_i);
+    TEST_ASSERT_EQUAL_UINT32(0, position.precision_bits);
+    TEST_ASSERT_EQUAL(meshtastic_Position_LocSource_LOC_EXTERNAL, position.location_source);
+}
+
+// Router::send re-applies the channel's precision to every POSITION_APP packet from us; the time
+// beacon must come out of it on a precision-0 primary with its time and source intact.
+static void test_applyPositionPrecision_timeOnlyPacketSurvivesSendPath()
+{
+    meshtastic_Position position = makeTimeOnlyPosition();
+    meshtastic_MeshPacket packet = meshtastic_MeshPacket_init_default;
+    packet.which_payload_variant = meshtastic_MeshPacket_decoded_tag;
+    packet.decoded.portnum = meshtastic_PortNum_POSITION_APP;
+    packet.decoded.payload.size = pb_encode_to_bytes(packet.decoded.payload.bytes, sizeof(packet.decoded.payload.bytes),
+                                                     &meshtastic_Position_msg, &position);
+
+    TEST_ASSERT_TRUE(applyPositionPrecision(packet, 0));
+
+    meshtastic_Position decoded = meshtastic_Position_init_default;
+    TEST_ASSERT_TRUE(
+        pb_decode_from_bytes(packet.decoded.payload.bytes, packet.decoded.payload.size, &meshtastic_Position_msg, &decoded));
+    TEST_ASSERT_EQUAL_UINT32(1790000000, decoded.time);
+    TEST_ASSERT_EQUAL(meshtastic_Position_LocSource_LOC_EXTERNAL, decoded.location_source);
+    TEST_ASSERT_FALSE(positionHasLocation(decoded));
+}
+
 static void test_applyPositionPrecision_reencodesPositionPacket()
 {
     meshtastic_Position position = makePosition();
@@ -461,6 +534,10 @@ void setup()
     RUN_TEST(test_applyPositionPrecision_fullPrecisionKeepsLatLon);
     RUN_TEST(test_applyPositionPrecision_zeroScrubsLocationButKeepsTime);
     RUN_TEST(test_applyPositionPrecision_reencodesPositionPacket);
+    RUN_TEST(test_positionHasLocation_anyCoordinateCounts);
+    RUN_TEST(test_applyPositionPrecision_zeroKeepsTimeOnlySource);
+    RUN_TEST(test_applyPositionPrecision_coarseDoesNotInventCoordinates);
+    RUN_TEST(test_applyPositionPrecision_timeOnlyPacketSurvivesSendPath);
     RUN_TEST(test_getPositionPrecisionForChannel_explicitPrecisionIsHonored);
     RUN_TEST(test_getPositionPrecisionForChannel_explicitZeroDisablesPrimary);
     RUN_TEST(test_getPositionPrecisionForChannel_primaryWithoutModuleSettingsFailsClosed);
