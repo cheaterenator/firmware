@@ -108,6 +108,10 @@ void onConnect(uint16_t conn_handle)
     connection->getPeerName(central_name, sizeof(central_name));
     LOG_INFO("BLE Connected to %s", central_name);
 
+    // Lets getRssi() read the link's RSSI; the SoftDevice stops measuring on its own when the link drops.
+    // An invalid threshold means no BLE_GAP_EVT_RSSI_CHANGED events, just the measurement.
+    sd_ble_gap_rssi_start(conn_handle, BLE_GAP_RSSI_THRESHOLD_INVALID, 0);
+
     // A new physical link must start unauthenticated. The auth slot is keyed by
     // the (single, reused) bluetoothPhoneAPI instance, so a prior session's
     // authorization can otherwise survive a quick reconnect. handleStartConfig()
@@ -306,7 +310,16 @@ bool NRF52Bluetooth::isConnected()
 }
 int NRF52Bluetooth::getRssi()
 {
-    return 0; // FIXME figure out where to source this
+    if (!isConnected())
+        return 0;
+
+    // Straight to the SoftDevice rather than Bluefruit.Connection(): a disconnect on the BLE task can free
+    // that BLEConnection under us, whereas a stale handle here just makes the call fail.
+    int8_t rssi = 0;
+    uint8_t channel = 0;
+    if (sd_ble_gap_rssi_get(connectionHandle, &rssi, &channel) != NRF_SUCCESS)
+        return 0;
+    return rssi;
 }
 
 // Valid BLE TX power levels as per nRF52840 Product Specification are: "-20 to +8 dBm TX power, configurable in 4 dB steps".

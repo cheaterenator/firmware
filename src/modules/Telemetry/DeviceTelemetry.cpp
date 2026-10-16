@@ -1,11 +1,14 @@
 #include "DeviceTelemetry.h"
 #include "../mesh/generated/meshtastic/telemetry.pb.h"
+#include "BluetoothCommon.h"
 #include "Default.h"
+#include "FSCommon.h"
 #include "MeshService.h"
 #include "NodeDB.h"
 #include "PowerFSM.h"
 #include "RadioLibInterface.h"
 #include "Router.h"
+#include "SPILock.h"
 #include "Throttle.h"
 #include "TransmitHistory.h"
 #include "UptimeClock.h"
@@ -16,8 +19,6 @@
 #include <OLEDDisplay.h>
 #include <OLEDDisplayUi.h>
 #include <meshUtils.h>
-#include "FSCommon.h"
-#include "SPILock.h"
 #if HAS_WIFI && !defined(ARCH_PORTDUINO)
 #include "mesh/wifi/WiFiAPClient.h"
 #endif
@@ -216,13 +217,16 @@ meshtastic_Telemetry DeviceTelemetryModule::getLocalStatsExtendedTelemetry()
     telemetry.variant.local_stats_extended.wifi_drops = getWifiDropCount();
     telemetry.variant.local_stats_extended.wifi_drop_reason = getWifiDropReason();
 #endif
+    // 0 (not sent) unless a phone is connected over BLE.
+    telemetry.variant.local_stats_extended.ble_rssi = getConnectedBleRssi();
 
     LOG_INFO("local stats extended: memory_free=%i, total_memory=%i, cpu=%i, flash_used=%i, flash_total=%i, wifi_rssi=%i, "
-             "wifi_drops=%u, wifi_drop_reason=%u",
+             "wifi_drops=%u, wifi_drop_reason=%u, ble_rssi=%i",
              telemetry.variant.local_stats_extended.memory_free_cheap, telemetry.variant.local_stats_extended.memory_total,
              CpuHwUsagePercent, telemetry.variant.local_stats_extended.flash_used_bytes,
              telemetry.variant.local_stats_extended.flash_total_bytes, telemetry.variant.local_stats_extended.wifi_rssi,
-             telemetry.variant.local_stats_extended.wifi_drops, telemetry.variant.local_stats_extended.wifi_drop_reason);
+             telemetry.variant.local_stats_extended.wifi_drops, telemetry.variant.local_stats_extended.wifi_drop_reason,
+             telemetry.variant.local_stats_extended.ble_rssi);
 
     return telemetry;
 }

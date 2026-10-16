@@ -1,6 +1,6 @@
 #include "OnDemandModule.h"
+#include "BluetoothCommon.h"
 #include "Default.h"
-#include "airtime.h"
 #include "FSCommon.h"
 #include "MeshService.h"
 #include "NodeDB.h"
@@ -11,6 +11,7 @@
 #include "Throttle.h"
 #include "TransmitHistory.h"
 #include "UptimeClock.h"
+#include "airtime.h"
 #include "configuration.h"
 #include "gps/RTC.h"
 #include "main.h"
@@ -332,6 +333,9 @@ meshtastic_OnDemand OnDemandModule::prepareNodeStats()
         s.wifi_drop_reason = getWifiDropReason();
     }
 #endif
+    // Omitted unless a phone is connected over BLE (getConnectedBleRssi() is 0 otherwise).
+    s.ble_rssi = getConnectedBleRssi();
+    s.has_ble_rssi = s.ble_rssi != 0;
 
     return onDemand;
 }

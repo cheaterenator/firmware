@@ -1809,6 +1809,7 @@ void AdminModule::handleGetDeviceConnectionStatus(const meshtastic_MeshPacket &r
 #elif defined(ARCH_NRF52)
     if (config.bluetooth.enabled && nrf52Bluetooth) {
         conn.bluetooth.is_connected = nrf52Bluetooth->isConnected();
+        conn.bluetooth.rssi = nrf52Bluetooth->getRssi();
     }
 #elif defined(MESHTASTIC_LINUX_BLE)
     if (config.bluetooth.enabled && linuxBluetooth) {
