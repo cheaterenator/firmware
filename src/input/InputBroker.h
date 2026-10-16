@@ -144,6 +144,8 @@ class InputBroker : public Observable<const InputEvent *>
     void registerSource(Observable<const InputEvent *> *source);
     void injectInputEvent(const InputEvent *event) { handleInputEvent(event); }
 #if defined(HAS_FREE_RTOS) && !defined(ARCH_RP2040)
+    // Starts the task that serves requestPollSoon(); call before the first request (task context only)
+    void startPollSoonWorker();
     void requestPollSoon(InputPollable *pollable);
     void queueInputEvent(const InputEvent *event);
     void processInputEventQueue();
@@ -157,7 +159,7 @@ class InputBroker : public Observable<const InputEvent *>
 #if defined(HAS_FREE_RTOS) && !defined(ARCH_RP2040)
     QueueHandle_t inputEventQueue;
     QueueHandle_t pollSoonQueue;
-    TaskHandle_t pollSoonTask;
+    TaskHandle_t pollSoonTask = nullptr;
     static void pollSoonWorker(void *p);
 #endif
 };

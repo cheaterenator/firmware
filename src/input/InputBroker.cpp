@@ -74,9 +74,25 @@ InputBroker::InputBroker()
 #if defined(HAS_FREE_RTOS) && !defined(ARCH_RP2040)
     inputEventQueue = xQueueCreate(5, sizeof(InputEvent));
     pollSoonQueue = xQueueCreate(5, sizeof(InputPollable *));
-    xTaskCreate(pollSoonWorker, "input-pollSoon", 2 * 1024, this, 10, &pollSoonTask);
+    // The worker task is started on demand by startPollSoonWorker(): most builds have no InputPollable
+    // source, and its stack would otherwise sit on the heap unused (8 KB on nRF52).
 #endif
 }
+
+#if defined(HAS_FREE_RTOS) && !defined(ARCH_RP2040)
+// ESP-IDF counts a task's stack in bytes, the other ports in words
+#ifdef ARCH_ESP32
+#define POLL_SOON_STACK 2048
+#else
+#define POLL_SOON_STACK 512
+#endif
+
+void InputBroker::startPollSoonWorker()
+{
+    if (!pollSoonTask)
+        xTaskCreate(pollSoonWorker, "input-pollSoon", POLL_SOON_STACK, this, 10, &pollSoonTask);
+}
+#endif
 
 void InputBroker::registerSource(Observable<const InputEvent *> *source)
 {

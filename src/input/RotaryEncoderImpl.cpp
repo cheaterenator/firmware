@@ -110,6 +110,7 @@ void RotaryEncoderImpl::attachRotaryEncoderInterrupts()
     if (rotary != nullptr && interruptInstance == nullptr) {
         rotary->resetButton();
 
+        inputBroker->startPollSoonWorker();
         interruptInstance = this;
         auto interruptHandler = []() { inputBroker->requestPollSoon(interruptInstance); };
         attachInterrupt(moduleConfig.canned_message.inputbroker_pin_a, interruptHandler, CHANGE);
