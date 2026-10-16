@@ -627,17 +627,21 @@ class AnalogBatteryLevel : public HasBatteryLevel
         // A configured INA outranks the board's own charge-status pin, as it does BATTERY_PIN in
         // getBattVoltage(): an external charger leaves that pin idle, reading "not charging" forever.
 #if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR && !defined(DISABLE_INA_CHARGING_DETECTION)
-        if (hasINA()) {
+        if (hasINA() && !(config.power.device_battery_ina_address & INA_ADDR_FLAG_VOLTAGE_ONLY)) {
             // get current flow from INA sensor - negative value means power flowing
             // into the battery default assuming  BATTERY+  <--> INA_VIN+ <--> SHUNT
             // RESISTOR <--> INA_VIN- <--> LOAD
-            LOG_TRACE("Using INA on I2C addr 0x%x for charging detection", config.power.device_battery_ina_address);
 #if defined(INA_CHARGING_DETECTION_INVERT)
-            return getINACurrent() > 0;
+            bool invert = true;
 #else
-            // return getINACurrent() < 0;
-		    return getINACurrent() > 0;
+            bool invert = false;
 #endif
+            // Units of one build can be wired either way round, so a flag in the address flips it per node
+            if (config.power.device_battery_ina_address & INA_ADDR_FLAG_INVERT)
+                invert = !invert;
+            const int16_t currentMa = getINACurrent();
+            LOG_TRACE("Using INA on I2C addr 0x%x for charging detection: %d mA, invert=%d", inaAddress(), currentMa, invert);
+            return invert ? currentMa > 0 : currentMa < 0;
         }
 #endif
 #if defined(ELECROW_ThinkNode_M6)
@@ -692,18 +696,26 @@ class AnalogBatteryLevel : public HasBatteryLevel
 #endif
 
 #if HAS_TELEMETRY && !MESHTASTIC_EXCLUDE_ENVIRONMENTAL_SENSOR
+    // INA2xx parts only answer at 0x40-0x4F, so device_battery_ina_address carries per-node options in
+    // bits no INA address uses. They keep the value below 256, as the field's int_size:8 storage requires.
+    static constexpr uint8_t INA_ADDR_FLAG_INVERT = 0x80;       // +128: flip this build's charging polarity
+    static constexpr uint8_t INA_ADDR_FLAG_VOLTAGE_ONLY = 0x20; // +32: battery voltage only, no charging detection
+
+    static uint8_t inaAddress()
+    {
+        return config.power.device_battery_ina_address & (uint8_t)~(INA_ADDR_FLAG_INVERT | INA_ADDR_FLAG_VOLTAGE_ONLY);
+    }
+
     uint16_t getINAVoltage()
     {
-        if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA219].first == config.power.device_battery_ina_address) {
+        const uint8_t addr = inaAddress();
+        if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA219].first == addr) {
             return ina219Sensor.getBusVoltageMv();
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA226].first ==
-                   config.power.device_battery_ina_address) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA226].first == addr) {
             return ina226Sensor.getBusVoltageMv();
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA260].first ==
-                   config.power.device_battery_ina_address) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA260].first == addr) {
             return ina260Sensor.getBusVoltageMv();
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA3221].first ==
-                   config.power.device_battery_ina_address) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA3221].first == addr) {
             return ina3221Sensor.getBusVoltageMv();
         }
         return 0;
@@ -711,16 +723,14 @@ class AnalogBatteryLevel : public HasBatteryLevel
 
     int16_t getINACurrent()
     {
-        if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA219].first == config.power.device_battery_ina_address) {
+        const uint8_t addr = inaAddress();
+        if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA219].first == addr) {
             return ina219Sensor.getCurrentMa();
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA226].first ==
-                   config.power.device_battery_ina_address) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA226].first == addr) {
             return ina226Sensor.getCurrentMa();
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA260].first ==
-                   config.power.device_battery_ina_address) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA260].first == addr) {
             return ina260Sensor.getCurrentMa();
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA3221].first ==
-                   config.power.device_battery_ina_address) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA3221].first == addr) {
             return ina3221Sensor.getCurrentMa();
         }
         return 0;
@@ -737,17 +747,17 @@ class AnalogBatteryLevel : public HasBatteryLevel
 
     bool hasINA()
     {
-        const uint8_t inaAddress = config.power.device_battery_ina_address;
-        if (!inaAddress) {
+        const uint8_t addr = inaAddress();
+        if (!addr) {
             return false;
         }
-        if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA219].first == inaAddress) {
+        if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA219].first == addr) {
             return sensorReady(ina219Sensor);
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA226].first == inaAddress) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA226].first == addr) {
             return sensorReady(ina226Sensor);
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA260].first == inaAddress) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA260].first == addr) {
             return sensorReady(ina260Sensor);
-        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA3221].first == inaAddress) {
+        } else if (nodeTelemetrySensorsMap[meshtastic_TelemetrySensorType_INA3221].first == addr) {
             return sensorReady(ina3221Sensor);
         }
         return false;
