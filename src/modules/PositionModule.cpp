@@ -671,7 +671,7 @@ int32_t PositionModule::runOnce()
         lastTimeBeaconMs = now;
     }
 
-    // Hold to the 6h floor when fixed_position (every role: pinning yourself forfeits the
+    // Hold to the stationary floor when fixed_position (every role: pinning yourself forfeits the
     // exception) or when stationary. A real move still goes out early via smart-broadcast below.
     // Not-fixed exceptions: lost-and-found broadcasts freely; trackers judge movement at their
     // own (unclamped) precision rather than the on-wire one (useConfiguredPrecision).

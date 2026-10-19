@@ -910,6 +910,10 @@ void setup()
 #endif
 #if !defined(ARCH_STM32WL) && !MESHTASTIC_EXCLUDE_MAGNETOMETER
     auto mag_info = i2cScanner->firstMagnetometer();
+#if !MESHTASTIC_EXCLUDE_ACCELEROMETER
+    if (mag_info.type == acc_info.type) // a BMM150 with no accelerometer beside it is already the accelerometer thread's
+        mag_info = ScanI2C::DEVICE_NONE;
+#endif
     magnetometer_found = mag_info.type != ScanI2C::DeviceType::NONE ? mag_info.address : magnetometer_found;
     LOG_DEBUG("mag_info = %i", mag_info.type);
 #endif
@@ -1656,6 +1660,9 @@ void loop()
         inputBroker->processInputEventQueue();
 #endif
 #if ARCH_PORTDUINO
+#ifndef ARCH_PORTDUINO_WASM
+    serviceNativeDiscovery();
+#endif
     if (portduino_config.lora_spi_dev == "ch341" && ch341Hal != nullptr) {
         ch341Hal->checkError();
     }
