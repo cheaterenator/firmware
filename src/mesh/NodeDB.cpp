@@ -653,9 +653,29 @@ NodeDB::NodeDB()
     // This keeps position broadcasts / MQTT map reports working after reboot on GPS-less nodes.
     if (config.position.fixed_position) {
         meshtastic_PositionLite fixedPos;
+        meshtastic_PositionLite backup;
+        const bool haveBackup = loadFixedPositionBackup(backup);
         if (copyNodePosition(getNodeNum(), fixedPos) && (fixedPos.latitude_i != 0 || fixedPos.longitude_i != 0)) {
             setLocalPosition(TypeConversions::ConvertToPosition(fixedPos));
             LOG_INFO("Restored fixed position to localPosition: lat=%d lon=%d", fixedPos.latitude_i, fixedPos.longitude_i);
+            // Fork: the node DB is authoritative; (re)write the copy if it is missing or stale.
+            if (!haveBackup || backup.latitude_i != fixedPos.latitude_i || backup.longitude_i != fixedPos.longitude_i ||
+                backup.altitude != fixedPos.altitude)
+                saveFixedPositionBackup(fixedPos);
+        } else if (haveBackup) {
+            // Fork: fixed_position is set but nodes.proto came back without our coordinates (lost or
+            // discarded node DB) - put the backup copy back instead of going silent on position.
+#if !MESHTASTIC_EXCLUDE_POSITIONDB
+            {
+                concurrency::LockGuard guard(&satelliteMutex);
+                nodePositions[getNodeNum()] = backup;
+            }
+            // Map writes are invisible to the nodeDatabase CRC compare below, so flag the segment.
+            saveWhat |= SEGMENT_NODEDATABASE;
+#endif
+            setLocalPosition(TypeConversions::ConvertToPosition(backup));
+            LOG_WARN("Fixed position missing from node DB, restored from %s: lat=%d lon=%d", fixedPositionFileName,
+                     backup.latitude_i, backup.longitude_i);
         }
     }
 
@@ -917,6 +937,7 @@ int NodeDB::installUserPrefsFixedPosition()
     changed |= SEGMENT_NODEDATABASE;
 #endif
     setLocalPosition(fixedGPS);
+    saveFixedPositionBackup(TypeConversions::ConvertToPositionLite(fixedGPS));
     config.position.fixed_position = true;
     // Same for config. Keep the boot compare's degraded-boot guard so an unreadable config is never
     // overwritten with UNSET defaults.
@@ -926,6 +947,57 @@ int NodeDB::installUserPrefsFixedPosition()
     return changed;
 }
 #endif
+
+// Fork: the fixed coordinates otherwise live only in nodes.proto, which is rewritten in place (old
+// file removed before the new one is written) up to once a minute. A reset in that window boots
+// with an empty node DB and fixed_position still set, so the node silently stops sending
+// positions. This copy is a few bytes, written atomically and only when the position changes.
+void NodeDB::saveFixedPositionBackup(const meshtastic_PositionLite &pos)
+{
+    if (pos.latitude_i == 0 && pos.longitude_i == 0) {
+        removeFixedPositionBackup();
+        return;
+    }
+#ifdef FSCom
+    meshtastic_PositionLite backup = pos;
+    backup.time = 0; // not part of the fix; the position time is refreshed at runtime
+    spiLock->lock();
+    FSCom.mkdir("/prefs");
+    spiLock->unlock();
+    if (!saveProto(fixedPositionFileName, meshtastic_PositionLite_size, &meshtastic_PositionLite_msg, &backup, true))
+        LOG_WARN("Can't save fixed position backup");
+#endif
+}
+
+void NodeDB::removeFixedPositionBackup()
+{
+#ifdef FSCom
+    concurrency::LockGuard g(spiLock);
+    if (FSCom.exists(fixedPositionFileName) && !FSCom.remove(fixedPositionFileName))
+        LOG_WARN("Can't remove %s", fixedPositionFileName);
+#endif
+}
+
+bool NodeDB::loadFixedPositionBackup(meshtastic_PositionLite &out)
+{
+#ifdef FSCom
+    {
+        concurrency::LockGuard g(spiLock);
+        if (!FSCom.exists(fixedPositionFileName))
+            return false;
+    }
+    meshtastic_PositionLite backup = meshtastic_PositionLite_init_zero;
+    if (loadProto(fixedPositionFileName, meshtastic_PositionLite_size, sizeof(backup), &meshtastic_PositionLite_msg, &backup) !=
+            LoadFileResult::LOAD_SUCCESS ||
+        (backup.latitude_i == 0 && backup.longitude_i == 0))
+        return false;
+    out = backup;
+    return true;
+#else
+    (void)out;
+    return false;
+#endif
+}
 
 bool NodeDB::factoryReset(bool eraseBleBonds)
 {
@@ -3120,7 +3192,8 @@ bool NodeDB::disableLockdownToPlaintext()
     // the commit point) only runs after every file is confirmed plaintext.
     const char *filesToCheck[] = {STANDARD_CONFIG_FILE_NAME, STANDARD_CHANNEL_FILE_NAME, STANDARD_BACKUP_FILE_NAME,
                                   EVENT_CONFIG_FILE_NAME,    EVENT_CHANNEL_FILE_NAME,    EVENT_BACKUP_FILE_NAME,
-                                  moduleConfigFileName,      deviceStateFileName,        nodeDatabaseFileName};
+                                  moduleConfigFileName,      deviceStateFileName,        nodeDatabaseFileName,
+                                  fixedPositionFileName};
     for (const char *fn : filesToCheck) {
         if (!EncryptedStorage::migrateFileToPlaintext(fn)) {
             LOG_ERROR("NodeDB: revert %s to plaintext failed; abort disable (stays in lockdown)", fn);

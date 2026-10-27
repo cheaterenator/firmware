@@ -122,6 +122,8 @@ extern meshtastic_Position localPosition;
 static constexpr const char *deviceStateFileName = "/prefs/device.proto";
 static constexpr const char *legacyPrefFileName = "/prefs/db.proto";
 static constexpr const char *nodeDatabaseFileName = "/prefs/nodes.proto";
+// Fork: atomic copy of the fixed position, which otherwise lives only in nodes.proto (see NodeDB.cpp)
+static constexpr const char *fixedPositionFileName = "/prefs/fixedpos.proto";
 // Event builds isolate radio profiles so normal firmware resumes its config and channels after OTA.
 static constexpr const char *STANDARD_CONFIG_FILE_NAME = "/prefs/config.proto";
 static constexpr const char *STANDARD_CHANNEL_FILE_NAME = "/prefs/channels.proto";
@@ -643,6 +645,12 @@ class NodeDB
     bool isHalfEmpty() const;
 
     void clearLocalPosition();
+
+    /// Fork: keep an atomically written copy of the fixed position next to nodes.proto, so a node DB lost
+    /// to an interrupted rewrite doesn't take the coordinates with it. Zero coordinates remove the copy.
+    void saveFixedPositionBackup(const meshtastic_PositionLite &pos);
+    void removeFixedPositionBackup();
+    bool loadFixedPositionBackup(meshtastic_PositionLite &out);
 
     void setLocalPosition(meshtastic_Position position, bool timeOnly = false)
     {

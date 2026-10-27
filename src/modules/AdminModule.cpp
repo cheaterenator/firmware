@@ -593,6 +593,7 @@ bool AdminModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshta
         nodeDB->updatePosition(node->num, r->set_fixed_position, RX_SRC_LOCAL);
         nodeDB->setLocalPosition(r->set_fixed_position);
         config.position.fixed_position = true;
+        nodeDB->saveFixedPositionBackup(TypeConversions::ConvertToPositionLite(r->set_fixed_position));
         saveChanges(SEGMENT_NODEDATABASE | SEGMENT_CONFIG, false);
 #if !MESHTASTIC_EXCLUDE_GPS
         if (gps != nullptr)
@@ -605,6 +606,7 @@ bool AdminModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshta
     case meshtastic_AdminMessage_remove_fixed_position_tag: {
         LOG_INFO("Client got remove_fixed_position");
         nodeDB->clearLocalPosition();
+        nodeDB->removeFixedPositionBackup();
         config.position.fixed_position = false;
         saveChanges(SEGMENT_NODEDATABASE | SEGMENT_CONFIG, false);
         break;
@@ -947,6 +949,9 @@ void AdminModule::handleSetConfig(const meshtastic_Config &c, bool fromOthers)
             nodeDB->clearLocalPosition();
             saveChanges(SEGMENT_NODEDATABASE | SEGMENT_CONFIG, false);
         }
+        // Fork: a cleared fixed flag must not let a later boot put the old coordinates back.
+        if (config.position.fixed_position && !c.payload_variant.position.fixed_position)
+            nodeDB->removeFixedPositionBackup();
         config.position = c.payload_variant.position;
 
         // Save nodedb as well in case we got a fixed position packet
