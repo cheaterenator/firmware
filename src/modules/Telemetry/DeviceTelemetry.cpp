@@ -16,6 +16,7 @@
 #include "gps/RTC.h"
 #include "main.h"
 #include "memGet.h"
+#include "modules/OnDemandModule.h"
 #include <OLEDDisplay.h>
 #include <OLEDDisplayUi.h>
 #include <meshUtils.h>
@@ -25,22 +26,29 @@
 
 #define MAGIC_USB_BATTERY_LEVEL 101
 static constexpr uint16_t TX_HISTORY_KEY_DEVICE_TELEMETRY = 0x8001;
+static constexpr uint16_t TX_HISTORY_KEY_LOCAL_STATS = 0x8007;
+static constexpr uint16_t TX_HISTORY_KEY_LOCAL_STATS_EXTENDED = 0x8008;
+// Least time between any two of our device metrics / LocalStats / LocalStatsExtended mesh broadcasts.
+static constexpr uint32_t MESH_BROADCAST_GAP_MS = 2 * 60 * 1000;
+// The random extra delay of a LocalStats(Extended) emission is 0 to this many permille of its interval.
+static constexpr long LOCAL_STATS_MAX_EXTRA_DELAY_PERMILLE = 100;
 
 int32_t DeviceTelemetryModule::runOnce()
 {
+    if (firstRunMs == 0) {
+        firstRunMs = Time::stampMillis();
+        localStatsExtraDelayPermille = random(0, LOCAL_STATS_MAX_EXTRA_DELAY_PERMILLE + 1);
+        localStatsExtendedExtraDelayPermille = random(0, LOCAL_STATS_MAX_EXTRA_DELAY_PERMILLE + 1);
+    }
 
     uint32_t lastTelemetry = transmitHistory ? transmitHistory->getLastSentToMeshMillis(TX_HISTORY_KEY_DEVICE_TELEMETRY) : 0;
-    bool isImpoliteRole = isSensorOrRouterRole();
     if (((lastTelemetry == 0) || Throttle::hasElapsed(lastTelemetry, Default::getConfiguredOrDefaultMsScaled(
                                                                          moduleConfig.telemetry.device_update_interval,
                                                                          default_telemetry_broadcast_interval_secs,
                                                                          numOnlineNodes, TrafficType::TELEMETRY))) &&
-        airTime->isTxAllowedChannelUtil(!isImpoliteRole) && airTime->isTxAllowedAirUtil() &&
-        config.device.role != meshtastic_Config_DeviceConfig_Role_CLIENT_HIDDEN &&
-        moduleConfig.telemetry.device_telemetry_enabled) {
+        moduleConfig.telemetry.device_telemetry_enabled && meshBroadcastAllowed()) {
         sendTelemetry();
-        sendLocalStatsToMesh();
-		sendLocalStatsExtendedToMesh();
+        lastMeshBroadcastMs = Time::stampMillis();
         if (transmitHistory)
             transmitHistory->setLastSentToMesh(TX_HISTORY_KEY_DEVICE_TELEMETRY);
     } else if (service->isToPhoneQueueEmpty()) {
@@ -52,7 +60,54 @@ int32_t DeviceTelemetryModule::runOnce()
             lastSentStatsToPhone = Time::skipZero(Time::getMillis());
         }
     }
+
+    // LocalStats and LocalStatsExtended follow their own switches and intervals (OnDemandModule holds
+    // them), not device metrics'. The gap in meshBroadcastAllowed() lets at most one go per pass.
+    if (onDemandModule) {
+        const meshtastic_LocalStatsBroadcastConfig &cfg = onDemandModule->getLocalStatsBroadcastConfig();
+        maybeSendLocalStatsToMesh(false, cfg.local_stats_enabled, cfg.local_stats_interval_secs, localStatsExtraDelayPermille);
+        maybeSendLocalStatsToMesh(true, cfg.local_stats_extended_enabled, cfg.local_stats_extended_interval_secs,
+                                  localStatsExtendedExtraDelayPermille);
+    }
     return sendToPhoneIntervalMs;
+}
+
+bool DeviceTelemetryModule::localStatsBroadcastDue(uint32_t nowMs, uint32_t lastSentMs, uint32_t startMs, uint32_t intervalMs,
+                                                   uint32_t extraDelayMs)
+{
+    if (lastSentMs == 0)
+        return nowMs - startMs >= extraDelayMs;
+    return nowMs - lastSentMs >= intervalMs + extraDelayMs;
+}
+
+bool DeviceTelemetryModule::meshBroadcastAllowed()
+{
+    // Cheap checks first: the airtime ones log a warning whenever they refuse.
+    return config.device.role != meshtastic_Config_DeviceConfig_Role_CLIENT_HIDDEN &&
+           (lastMeshBroadcastMs == 0 || Throttle::hasElapsed(lastMeshBroadcastMs, MESH_BROADCAST_GAP_MS)) &&
+           airTime->isTxAllowedChannelUtil(!isSensorOrRouterRole()) && airTime->isTxAllowedAirUtil();
+}
+
+bool DeviceTelemetryModule::maybeSendLocalStatsToMesh(bool extended, bool enabled, uint32_t intervalSecs,
+                                                      uint32_t &extraDelayPermille)
+{
+    if (!enabled)
+        return false;
+    const uint16_t key = extended ? TX_HISTORY_KEY_LOCAL_STATS_EXTENDED : TX_HISTORY_KEY_LOCAL_STATS;
+    uint32_t lastSent = transmitHistory ? transmitHistory->getLastSentToMeshMillis(key) : 0;
+    // intervalSecs * permille is the delay in ms; OnDemandModule caps intervalSecs so neither this nor
+    // the interval plus it can overflow.
+    if (!localStatsBroadcastDue(Time::getMillis(), lastSent, firstRunMs, intervalSecs * 1000UL,
+                                intervalSecs * extraDelayPermille) ||
+        !meshBroadcastAllowed())
+        return false;
+    if (!(extended ? sendLocalStatsExtendedToMesh() : sendLocalStatsToMesh()))
+        return false;
+    lastMeshBroadcastMs = Time::stampMillis();
+    if (transmitHistory)
+        transmitHistory->setLastSentToMesh(key);
+    extraDelayPermille = random(0, LOCAL_STATS_MAX_EXTRA_DELAY_PERMILLE + 1);
+    return true;
 }
 
 bool DeviceTelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_Telemetry *t)
@@ -245,25 +300,30 @@ void DeviceTelemetryModule::sendLocalStatsToPhone()
     service->sendToPhone(p);
 }
 
-void DeviceTelemetryModule::sendLocalStatsToMesh()
+bool DeviceTelemetryModule::sendLocalStatsToMesh()
 {
     meshtastic_MeshPacket *p = allocDataProtobuf(getLocalStatsTelemetry());
+    if (!p)
+        return false;
     p->to = NODENUM_BROADCAST;
     p->decoded.want_response = false;
     p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
 
     service->sendToMesh(p, RX_SRC_LOCAL, true);
+    return true;
 }
 
-
-void DeviceTelemetryModule::sendLocalStatsExtendedToMesh()
+bool DeviceTelemetryModule::sendLocalStatsExtendedToMesh()
 {
     LOG_INFO("Sending local stats extended to mesh");
     meshtastic_MeshPacket *p = allocDataProtobuf(getLocalStatsExtendedTelemetry());
+    if (!p)
+        return false;
     p->to = NODENUM_BROADCAST;
     p->decoded.want_response = false;
     p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
     service->sendToMesh(p, RX_SRC_LOCAL, true);
+    return true;
 }
 
 

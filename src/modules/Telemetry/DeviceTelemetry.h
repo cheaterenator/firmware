@@ -24,6 +24,12 @@ class DeviceTelemetryModule : private concurrency::OSThread,
     }
     virtual bool wantUIFrame() { return false; }
 
+    // LocalStats / LocalStatsExtended broadcast cadence (LocalStatsBroadcastConfig in ondemand.proto):
+    // due intervalMs + extraDelayMs after lastSentMs, or only extraDelayMs after startMs (our first run) when
+    // there is no last send (lastSentMs == 0), so first sends after boot are spread out, not all at once.
+    static bool localStatsBroadcastDue(uint32_t nowMs, uint32_t lastSentMs, uint32_t startMs, uint32_t intervalMs,
+                                       uint32_t extraDelayMs);
+
   protected:
     /** Called to handle a particular incoming message
     @return true if you've guaranteed you've handled this message and no other handlers should be considered for it
@@ -42,10 +48,20 @@ class DeviceTelemetryModule : private concurrency::OSThread,
 	meshtastic_Telemetry getLocalStatsExtendedTelemetry();
 
     void sendLocalStatsToPhone();
-    void sendLocalStatsToMesh();
-	void sendLocalStatsExtendedToMesh();
+    bool sendLocalStatsToMesh();
+    bool sendLocalStatsExtendedToMesh();
+    // Role, airtime, and MESH_BROADCAST_GAP_MS since lastMeshBroadcastMs: shared by all our mesh broadcasts.
+    bool meshBroadcastAllowed();
+    // Sends LocalStats (or LocalStatsExtended) once it is due, then redraws its extra delay. true if sent.
+    bool maybeSendLocalStatsToMesh(bool extended, bool enabled, uint32_t intervalSecs, uint32_t &extraDelayPermille);
     uint32_t sendToPhoneIntervalMs = SECONDS_IN_MINUTE * 1000;           // Send to phone every minute
     uint32_t sendStatsToPhoneIntervalMs = 15 * SECONDS_IN_MINUTE * 1000; // Send stats to phone every 15 minutes
     uint32_t lastSentStatsToPhone = 0;
     bool statsHaveBeenSent = false;
+    uint32_t firstRunMs = 0;          // stamp of our first runOnce(), where the first LocalStats waits start
+    uint32_t lastMeshBroadcastMs = 0; // stamp of our last device metrics / LocalStats(Extended) mesh broadcast
+    // Random extra delay of the next LocalStats / LocalStatsExtended emission, in permille of its
+    // interval. Redrawn after every emission, so the two drift apart even on equal intervals.
+    uint32_t localStatsExtraDelayPermille = 0;
+    uint32_t localStatsExtendedExtraDelayPermille = 0;
 };

@@ -58,6 +58,8 @@
   // "USERPREFS_CONFIG_POSITION_BROADCAST_INTERVAL": "1800",
   // "USERPREFS_CONFIG_DEVICE_TELEM_ENABLED": "true", // Broadcast device telemetry to the mesh (default off since 2.8)
   // "USERPREFS_CONFIG_DEVICE_TELEM_UPDATE_INTERVAL": "900", // Device telemetry update interval in seconds
+  // "USERPREFS_LOCAL_STATS_BROADCAST_SECS": "3600", // Broadcast LocalStats to the mesh every N s (+ random 0-10%), independent of device telemetry; 0 = off (default), min 1800. Default until the app sets it (OnDemand LocalStatsBroadcastConfig)
+  // "USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS": "3600", // Same for LocalStatsExtended; never within 2 min of device metrics or LocalStats
   // "USERPREFS_DIAG_MIN_BROADCAST_SECS": "300", // Diagnostics only: lowers the telemetry (30 min) and position (1 h, 6 h when fixed/stationary) broadcast floors to this value (min 300)
   // "USERPREFS_CONFIG_ENV_TELEM_UPDATE_INTERVAL": "900",     // Environment telemetry update interval in seconds
   // "USERPREFS_CONFIG_ENVIRONMENT_MEASUREMENT_ENABLED": "1", // Force BMP280/sensor reads + LoRa broadcast on first boot

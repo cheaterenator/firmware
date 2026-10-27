@@ -132,6 +132,19 @@ message NodeStatsBroadcastConfig {
     uint32 interval_secs = 2;
 }
 
+// Switches + intervals for this node's own LocalStats and LocalStatsExtended broadcasts (TELEMETRY_APP,
+// see OnDemandType.REQUEST_LOCAL_STATS_BROADCAST_CONFIG / _SET_ below). Independent of
+// moduleConfig.telemetry, which keeps its own switch and interval for device metrics. Every emission
+// gets a random extra delay of up to a tenth of its interval, and the node keeps two minutes between
+// any two of its device metrics / LocalStats / LocalStatsExtended broadcasts. interval_secs 0 = default
+// (1 h, 12 h on router roles); below 30 min it is raised to 30 min, above 30 days lowered to 30 days.
+message LocalStatsBroadcastConfig {
+    bool local_stats_enabled = 1;
+    uint32 local_stats_interval_secs = 2;
+    bool local_stats_extended_enabled = 3;
+    uint32 local_stats_extended_interval_secs = 4;
+}
+
 enum OnDemandType {
     UNKNOWN_TYPE = 0;
     REQUEST_PACKET_RX_HISTORY = 1;
@@ -168,12 +181,24 @@ enum OnDemandType {
     REQUEST_NODE_STATS_BROADCAST_CONFIG = 27;
     RESPONSE_NODE_STATS_BROADCAST_CONFIG = 28;
     REQUEST_SET_NODE_STATS_BROADCAST_CONFIG = 29;
+    // Get/set the periodic LocalStats / LocalStatsExtended broadcasts (see LocalStatsBroadcastConfig
+    // above). GET is answered for any node in range. SET is honored only from the locally-attached phone
+    // (mp.from == 0) or from a node whose public key is one of this node's admin keys (the PKI check
+    // remote admin uses); anyone else gets a Routing error (ADMIN_PUBLIC_KEY_UNAUTHORIZED, or
+    // NOT_AUTHORIZED when the request was not PKI-encrypted) and no config. A node that predates
+    // these answers with response_type UNKNOWN_TYPE.
+    REQUEST_LOCAL_STATS_BROADCAST_CONFIG = 30;
+    RESPONSE_LOCAL_STATS_BROADCAST_CONFIG = 31;
+    REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG = 32;
 }
 
 message OnDemandRequest {
     OnDemandType request_type = 1;
     // Only present (and only consulted) when request_type == REQUEST_SET_NODE_STATS_BROADCAST_CONFIG.
     optional NodeStatsBroadcastConfig node_stats_broadcast_config = 2;
+    // Only present (and only consulted) when request_type == REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG.
+    // Sets both broadcasts at once: read the current config first to change only one.
+    optional LocalStatsBroadcastConfig local_stats_broadcast_config = 3;
 }
 
 message SnifferState {
@@ -195,6 +220,7 @@ message OnDemandResponse {
         RoutingErrorsHistory routing_errors = 11;
         SnifferState sniffer_state = 12;
         NodeStatsBroadcastConfig node_stats_broadcast_config = 13;
+        LocalStatsBroadcastConfig local_stats_broadcast_config = 14;
     }
 }
 

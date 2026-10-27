@@ -29,6 +29,16 @@ class OnDemandModule : public ProtobufModule<meshtastic_OnDemand>, private concu
   public:
     OnDemandModule();
 
+    // Switches + intervals (already defaulted and clamped) for the LocalStats / LocalStatsExtended
+    // broadcasts. DeviceTelemetryModule sends those, since it builds the payloads; this module only
+    // stores the config and serves REQUEST_(SET_)LOCAL_STATS_BROADCAST_CONFIG.
+    const meshtastic_LocalStatsBroadcastConfig &getLocalStatsBroadcastConfig() const { return localStatsBroadcastConfig; }
+
+    // Whether mp may change the LocalStats broadcast config: it comes from the phone attached to us
+    // (mp.from == 0), or PKI-authenticated from a node whose key is one of our admin keys - the same
+    // check remote admin passes (AdminModule).
+    static bool mayChangeLocalStatsBroadcastConfig(const meshtastic_MeshPacket &mp);
+
   protected:
     virtual bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_OnDemand *p) override;
     virtual meshtastic_MeshPacket *allocReply() override;
@@ -61,6 +71,14 @@ class OnDemandModule : public ProtobufModule<meshtastic_OnDemand>, private concu
 
     bool nodeStatsBroadcastEnabled = false;
     uint32_t nodeStatsBroadcastIntervalSecs = 0; // default_ondemand_node_stats_broadcast_interval_secs resolves this in the .cpp
+
+    meshtastic_OnDemand prepareLocalStatsBroadcastConfig();
+    void applyLocalStatsBroadcastConfig(const meshtastic_LocalStatsBroadcastConfig &cfg);
+    void loadLocalStatsBroadcastConfig();
+    void saveLocalStatsBroadcastConfig();
+
+    // Factory defaults from USERPREFS_LOCAL_STATS_(EXTENDED_)BROADCAST_SECS, set in the constructor.
+    meshtastic_LocalStatsBroadcastConfig localStatsBroadcastConfig = meshtastic_LocalStatsBroadcastConfig_init_zero;
 };
 
 extern OnDemandModule *onDemandModule;

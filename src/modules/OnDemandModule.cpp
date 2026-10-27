@@ -16,6 +16,8 @@
 #include "gps/RTC.h"
 #include "main.h"
 #include "memGet.h"
+#include "mesh/AdminKeys.h"
+#include "modules/RoutingModule.h"
 #include <cstring>
 #include <pb_encode.h>
 #if HAS_WIFI && !defined(ARCH_PORTDUINO)
@@ -31,18 +33,46 @@ static const size_t MAX_PACKET_SIZE = 190;
 // the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 4 = adds
 // REQUEST_NODE_STATS_BROADCAST_CONFIG/_SET_ (periodic push of RESPONSE_NODE_STATS, see
 // applyNodeStatsBroadcastConfig()).
-#define FW_PLUS_VERSION 2
+#define FW_PLUS_VERSION 3
 
 static constexpr uint16_t TX_HISTORY_KEY_ONDEMAND_NODE_STATS = 0x8006;
 // A configured interval below this floor is clamped up - mirrors min_default_telemetry_interval_secs'
 // role for moduleConfig.telemetry, applied here since this broadcast isn't part of that message.
 static constexpr uint32_t MIN_NODE_STATS_BROADCAST_INTERVAL_SECS = min_default_telemetry_interval_secs;
+// Keeps interval + DeviceTelemetryModule's random extra delay (up to a tenth more) well inside the
+// 32-bit millis() span the send throttle measures in.
+static constexpr uint32_t MAX_LOCAL_STATS_BROADCAST_INTERVAL_SECS = 30UL * 24 * 60 * 60;
+
+// Factory defaults for the LocalStats / LocalStatsExtended broadcasts, used until a
+// REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG is saved: the interval in seconds, 0 = off.
+#ifndef USERPREFS_LOCAL_STATS_BROADCAST_SECS
+#define USERPREFS_LOCAL_STATS_BROADCAST_SECS 0
+#endif
+#ifndef USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS
+#define USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS 0
+#endif
+
+// 0 = default, then the same floor as the NodeStats broadcast, and the cap above.
+static uint32_t normalizeLocalStatsIntervalSecs(uint32_t secs)
+{
+    secs = Default::getConfiguredOrMinimumValue(
+        Default::getConfiguredOrDefault(secs, default_ondemand_local_stats_broadcast_interval_secs),
+        MIN_NODE_STATS_BROADCAST_INTERVAL_SECS);
+    return secs > MAX_LOCAL_STATS_BROADCAST_INTERVAL_SECS ? MAX_LOCAL_STATS_BROADCAST_INTERVAL_SECS : secs;
+}
 
 OnDemandModule::OnDemandModule() : ProtobufModule("OnDemand", meshtastic_PortNum_FWPLUS_APP, &meshtastic_OnDemand_msg),
                                     concurrency::OSThread("OnDemand")
 {
     nodeStatsBroadcastIntervalSecs = default_ondemand_node_stats_broadcast_interval_secs;
     loadNodeStatsBroadcastConfig();
+
+    localStatsBroadcastConfig.local_stats_enabled = USERPREFS_LOCAL_STATS_BROADCAST_SECS > 0;
+    localStatsBroadcastConfig.local_stats_interval_secs = normalizeLocalStatsIntervalSecs(USERPREFS_LOCAL_STATS_BROADCAST_SECS);
+    localStatsBroadcastConfig.local_stats_extended_enabled = USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS > 0;
+    localStatsBroadcastConfig.local_stats_extended_interval_secs =
+        normalizeLocalStatsIntervalSecs(USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS);
+    loadLocalStatsBroadcastConfig();
 }
 
 bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_OnDemand *t)
@@ -122,6 +152,28 @@ bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
                       mp.from);
         }
         sendPacketToRequester(prepareNodeStatsBroadcastConfig(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_LOCAL_STATS_BROADCAST_CONFIG:
+        sendPacketToRequester(prepareLocalStatsBroadcastConfig(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG:
+        // Unlike REQUEST_SET_NODE_STATS_BROADCAST_CONFIG, only from our own phone or an admin key. Anyone
+        // else gets the routing error AdminModule would answer with, and no config.
+        if (!mayChangeLocalStatsBroadcastConfig(mp)) {
+            LOG_WARN("OnDemand: ignoring REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG from=0x%08x pki=%d: not an admin key", mp.from,
+                     mp.pki_encrypted);
+            if (routingModule)
+                routingModule->sendAckNak(mp.pki_encrypted ? meshtastic_Routing_Error_ADMIN_PUBLIC_KEY_UNAUTHORIZED
+                                                           : meshtastic_Routing_Error_NOT_AUTHORIZED,
+                                          getFrom(&mp), mp.id, mp.channel, routingModule->getHopLimitForResponse(mp));
+            break;
+        }
+        if (t->variant.request.has_local_stats_broadcast_config) {
+            applyLocalStatsBroadcastConfig(t->variant.request.local_stats_broadcast_config);
+        } else {
+            LOG_WARN("OnDemand: REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG from=0x%08x had no config payload, ignoring", mp.from);
+        }
+        sendPacketToRequester(prepareLocalStatsBroadcastConfig(), mp);
         break;
     default: {
         meshtastic_OnDemand unknown = meshtastic_OnDemand_init_zero;
@@ -548,6 +600,37 @@ void OnDemandModule::applyNodeStatsBroadcastConfig(const meshtastic_NodeStatsBro
     saveNodeStatsBroadcastConfig();
 }
 
+bool OnDemandModule::mayChangeLocalStatsBroadcastConfig(const meshtastic_MeshPacket &mp)
+{
+    // pki_encrypted is set only by our own PKI decrypt (Router::perhapsDecode; radio, UDP and MQTT
+    // ingress all clear it), which fills public_key with the key that actually opened the packet.
+    return mp.from == 0 || (mp.pki_encrypted && AdminKeys::isAuthorized(mp.public_key.bytes));
+}
+
+meshtastic_OnDemand OnDemandModule::prepareLocalStatsBroadcastConfig()
+{
+    meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
+    onDemand.which_variant = meshtastic_OnDemand_response_tag;
+    onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_LOCAL_STATS_BROADCAST_CONFIG;
+    onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_local_stats_broadcast_config_tag;
+    onDemand.variant.response.response_data.local_stats_broadcast_config = localStatsBroadcastConfig;
+    return onDemand;
+}
+
+void OnDemandModule::applyLocalStatsBroadcastConfig(const meshtastic_LocalStatsBroadcastConfig &cfg)
+{
+    localStatsBroadcastConfig.local_stats_enabled = cfg.local_stats_enabled;
+    localStatsBroadcastConfig.local_stats_interval_secs = normalizeLocalStatsIntervalSecs(cfg.local_stats_interval_secs);
+    localStatsBroadcastConfig.local_stats_extended_enabled = cfg.local_stats_extended_enabled;
+    localStatsBroadcastConfig.local_stats_extended_interval_secs =
+        normalizeLocalStatsIntervalSecs(cfg.local_stats_extended_interval_secs);
+    LOG_INFO("OnDemand: LocalStats broadcast config set to enabled=%d interval_secs=%u, extended enabled=%d interval_secs=%u",
+             localStatsBroadcastConfig.local_stats_enabled, localStatsBroadcastConfig.local_stats_interval_secs,
+             localStatsBroadcastConfig.local_stats_extended_enabled,
+             localStatsBroadcastConfig.local_stats_extended_interval_secs);
+    saveLocalStatsBroadcastConfig();
+}
+
 void OnDemandModule::broadcastNodeStats()
 {
     meshtastic_MeshPacket *p = allocDataProtobuf(prepareNodeStats());
@@ -576,6 +659,21 @@ struct __attribute__((packed)) NodeStatsBroadcastConfigFile {
     uint8_t version;
     uint8_t enabled;
     uint32_t intervalSecs;
+};
+
+// Same scheme for LocalStatsBroadcastConfig. Its file existing at all means the app has set it, so
+// the USERPREFS_LOCAL_STATS_* factory defaults no longer apply.
+constexpr const char *LOCAL_STATS_BROADCAST_CONFIG_FILENAME = "/prefs/ondemand_localstats_bcast.dat";
+constexpr uint32_t LOCAL_STATS_BROADCAST_CONFIG_MAGIC = 0x4C534243; // "LSBC"
+constexpr uint8_t LOCAL_STATS_BROADCAST_CONFIG_VERSION = 1;
+
+struct __attribute__((packed)) LocalStatsBroadcastConfigFile {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t localStatsEnabled;
+    uint32_t localStatsIntervalSecs;
+    uint8_t localStatsExtendedEnabled;
+    uint32_t localStatsExtendedIntervalSecs;
 };
 } // namespace
 
@@ -627,10 +725,68 @@ void OnDemandModule::saveNodeStatsBroadcastConfig()
     }
     spiLock->unlock();
 }
+
+void OnDemandModule::loadLocalStatsBroadcastConfig()
+{
+    auto &cfg = localStatsBroadcastConfig;
+    spiLock->lock();
+    auto file = FSCom.open(LOCAL_STATS_BROADCAST_CONFIG_FILENAME, FILE_O_READ);
+    if (file) {
+        LocalStatsBroadcastConfigFile stored{};
+        bool ok = file.read((uint8_t *)&stored, sizeof(stored)) == sizeof(stored);
+        if (ok && stored.magic == LOCAL_STATS_BROADCAST_CONFIG_MAGIC && stored.version == LOCAL_STATS_BROADCAST_CONFIG_VERSION) {
+            cfg.local_stats_enabled = stored.localStatsEnabled;
+            cfg.local_stats_interval_secs = normalizeLocalStatsIntervalSecs(stored.localStatsIntervalSecs);
+            cfg.local_stats_extended_enabled = stored.localStatsExtendedEnabled;
+            cfg.local_stats_extended_interval_secs = normalizeLocalStatsIntervalSecs(stored.localStatsExtendedIntervalSecs);
+            LOG_INFO("OnDemand: loaded LocalStats broadcast config from disk: enabled=%d interval_secs=%u, extended "
+                     "enabled=%d interval_secs=%u",
+                     cfg.local_stats_enabled, cfg.local_stats_interval_secs, cfg.local_stats_extended_enabled,
+                     cfg.local_stats_extended_interval_secs);
+        } else {
+            LOG_WARN("OnDemand: invalid LocalStats broadcast config file, using defaults");
+        }
+        file.close();
+    } else {
+        LOG_INFO("OnDemand: no LocalStats broadcast config file found, using defaults (enabled=%d interval_secs=%u, extended "
+                 "enabled=%d interval_secs=%u)",
+                 cfg.local_stats_enabled, cfg.local_stats_interval_secs, cfg.local_stats_extended_enabled,
+                 cfg.local_stats_extended_interval_secs);
+    }
+    spiLock->unlock();
+}
+
+void OnDemandModule::saveLocalStatsBroadcastConfig()
+{
+    spiLock->lock();
+    FSCom.mkdir("/prefs");
+    if (FSCom.exists(LOCAL_STATS_BROADCAST_CONFIG_FILENAME)) {
+        FSCom.remove(LOCAL_STATS_BROADCAST_CONFIG_FILENAME);
+    }
+    auto file = FSCom.open(LOCAL_STATS_BROADCAST_CONFIG_FILENAME, FILE_O_WRITE);
+    if (file) {
+        LocalStatsBroadcastConfigFile stored{};
+        stored.magic = LOCAL_STATS_BROADCAST_CONFIG_MAGIC;
+        stored.version = LOCAL_STATS_BROADCAST_CONFIG_VERSION;
+        stored.localStatsEnabled = localStatsBroadcastConfig.local_stats_enabled;
+        stored.localStatsIntervalSecs = localStatsBroadcastConfig.local_stats_interval_secs;
+        stored.localStatsExtendedEnabled = localStatsBroadcastConfig.local_stats_extended_enabled;
+        stored.localStatsExtendedIntervalSecs = localStatsBroadcastConfig.local_stats_extended_interval_secs;
+        file.write((uint8_t *)&stored, sizeof(stored));
+        file.flush();
+        file.close();
+        LOG_DEBUG("OnDemand: saved LocalStats broadcast config to disk");
+    } else {
+        LOG_WARN("OnDemand: failed to open LocalStats broadcast config file for writing");
+    }
+    spiLock->unlock();
+}
 #else
 // No filesystem available on this arch - config stays in-memory only for the boot session.
 void OnDemandModule::loadNodeStatsBroadcastConfig() {}
 void OnDemandModule::saveNodeStatsBroadcastConfig() {}
+void OnDemandModule::loadLocalStatsBroadcastConfig() {}
+void OnDemandModule::saveLocalStatsBroadcastConfig() {}
 #endif
 
 int32_t OnDemandModule::runOnce()

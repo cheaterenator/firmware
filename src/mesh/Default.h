@@ -49,6 +49,8 @@ static_assert(USERPREFS_DIAG_MIN_BROADCAST_SECS >= 300, "USERPREFS_DIAG_MIN_BROA
 // OnDemandModule's periodic RESPONSE_NODE_STATS broadcast (MT-SW private protocol) - independent
 // switch/interval from moduleConfig.telemetry, defaults to the same cadence as that broadcast.
 #define default_ondemand_node_stats_broadcast_interval_secs default_telemetry_broadcast_interval_secs
+// Same for the LocalStats / LocalStatsExtended broadcasts (LocalStatsBroadcastConfig, also MT-SW).
+#define default_ondemand_local_stats_broadcast_interval_secs default_telemetry_broadcast_interval_secs
 
 enum class TrafficType { POSITION, TELEMETRY };
 
