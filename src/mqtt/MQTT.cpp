@@ -46,6 +46,12 @@
 #endif
 #include <gps/RTC.h>
 
+// Uplink DMs (PKI DMs and text DMs on a channel key, ours and others') as upstream does. Off: no DM ever reaches
+// the broker, in plaintext or as ciphertext.
+#ifndef USERPREFS_UPLINK_DMS
+#define USERPREFS_UPLINK_DMS false
+#endif
+
 MQTT *mqtt;
 
 namespace
@@ -746,12 +752,16 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
         return;
     }
 #endif
-// Never uplink a packet addressed to a specific node (a DM) to MQTT, regardless of channel
-    // uplink settings or PKI status. Only broadcasts (telemetry, position, public channel chat)
-    // should ever reach the broker. Without this, a DM sent TO us - which we've already decrypted
-    // locally to show on screen - gets republished in plaintext the moment our node acts as gateway.
-    if (!isBroadcast(mp_decoded.to)) {
-        LOG_DEBUG("MQTT onSend - Suppress private (non-broadcast) packet from uplink");
+    // DMs reach the broker only when the user asks for them (USERPREFS_UPLINK_DMS). Without it no PKI DM and
+    // no text DM on a channel key goes out, ours or anyone's, in plaintext or as ciphertext: a DM sent TO us -
+    // which we've already decrypted locally to show on screen - would be republished the moment our node acts
+    // as gateway. Other unicast on a channel key (traceroute, ACKs, requests) is uplinked like broadcasts.
+    const bool isPkiDm = mp_encrypted.pki_encrypted || mp_decoded.pki_encrypted;
+    const bool isTextDm = !isBroadcast(mp_decoded.to) && mp_decoded.which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
+                          IS_ONE_OF(mp_decoded.decoded.portnum, meshtastic_PortNum_TEXT_MESSAGE_APP,
+                                    meshtastic_PortNum_TEXT_MESSAGE_COMPRESSED_APP);
+    if (!USERPREFS_UPLINK_DMS && (isPkiDm || isTextDm)) {
+        LOG_DEBUG("MQTT onSend - Suppress DM from uplink");
         return;
     }
     bool uplinkEnabled = false;

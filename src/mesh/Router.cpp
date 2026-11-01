@@ -620,16 +620,10 @@ ErrorCode Router::send(meshtastic_MeshPacket *p)
             return encodeResult; // FIXME - this isn't a valid ErrorCode
         }
 #if !MESHTASTIC_EXCLUDE_MQTT
-        // Only publish to MQTT if we're the original transmitter of the packet
+        // Only publish to MQTT if we're the original transmitter of the packet. MQTT::onSend decides on our DMs
+        // (USERPREFS_UPLINK_DMS); perhapsEncode() marked a PKI one pki_encrypted.
         if (moduleConfig.mqtt.enabled && isFromUs(p) && mqtt && p_decoded) {
-            // Only publish to MQTT only public messages
-            if(!(p_decoded->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP &&
-                p_decoded->to != 0xffffffff))
-            {
-                mqtt->onSend(*p, *p_decoded, chIndex);
-            }else{
-                LOG_DEBUG("MQTT secured messages enabled, message was not forwarded to broker\n");
-            }
+            mqtt->onSend(*p, *p_decoded, chIndex);
         }
 #endif
         packetPool.release(p_decoded);

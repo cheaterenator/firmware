@@ -341,6 +341,15 @@ const meshtastic_MeshPacket decoded = {
     .decoded = {.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP, .has_bitfield = true, .bitfield = BITFIELD_OK_TO_MQTT_MASK},
     .id = 4,
 };
+// decoded as a broadcast. This fork never uplinks a text DM unless USERPREFS_UPLINK_DMS asks, so the publish
+// tests send this one.
+const meshtastic_MeshPacket decodedBroadcast = {
+    .from = 1,
+    .to = NODENUM_BROADCAST,
+    .which_payload_variant = meshtastic_MeshPacket_decoded_tag,
+    .decoded = {.portnum = meshtastic_PortNum_TEXT_MESSAGE_APP, .has_bitfield = true, .bitfield = BITFIELD_OK_TO_MQTT_MASK},
+    .id = 4,
+};
 const meshtastic_MeshPacket encrypted = {
     .from = 1,
     .to = 2,
@@ -448,7 +457,7 @@ void tearDown(void)
 // Test that the decoded MeshPacket is published when encryption_enabled = false.
 void test_sendDirectlyConnectedDecoded(void)
 {
-    mqtt->onSend(encrypted, decoded, 0);
+    mqtt->onSend(encrypted, decodedBroadcast, 0);
 
     TEST_ASSERT_EQUAL(1, pubsub->published_.size());
     const auto &[topic, payload] = pubsub->published_.front();
@@ -463,7 +472,7 @@ void test_sendDirectlyConnectedEncrypted(void)
 {
     moduleConfig.mqtt.encryption_enabled = true;
 
-    mqtt->onSend(encrypted, decoded, 0);
+    mqtt->onSend(encrypted, decodedBroadcast, 0);
 
     TEST_ASSERT_EQUAL(1, pubsub->published_.size());
     const auto &[topic, payload] = pubsub->published_.front();
@@ -501,6 +510,8 @@ void test_privatePositionStillPublishesWithEventPolicy(void)
     TEST_ASSERT_EQUAL_STRING("msh/2/e/private/!12345678", pubsub->published_.front().first.c_str());
 }
 
+// This fork uplinks a PKI DM only with USERPREFS_UPLINK_DMS, so the event policy is checked under that pref;
+// without it the DM gate drops the packet first.
 void test_explicitPkiPositionStillPublishesWithEventPolicy(void)
 {
     configureCoordinatePolicyChannels();
@@ -513,8 +524,12 @@ void test_explicitPkiPositionStillPublishesWithEventPolicy(void)
 
     mqtt->onSend(encryptedPki, position, 0);
 
+#if USERPREFS_UPLINK_DMS
     TEST_ASSERT_EQUAL(1, pubsub->published_.size());
     TEST_ASSERT_EQUAL_STRING("msh/2/e/PKI/!12345678", pubsub->published_.front().first.c_str());
+#else
+    TEST_ASSERT_TRUE(pubsub->published_.empty());
+#endif
 }
 
 // Verify that the decoded MeshPacket is proxied through the MeshService when encryption_enabled = false.
@@ -523,7 +538,7 @@ void test_proxyToMeshServiceDecoded(void)
     moduleConfig.mqtt.proxy_to_client_enabled = true;
     MQTTUnitTest::restart();
 
-    mqtt->onSend(encrypted, decoded, 0);
+    mqtt->onSend(encrypted, decodedBroadcast, 0);
 
     TEST_ASSERT_EQUAL(1, mockMeshService->messages_.size());
     const meshtastic_MqttClientProxyMessage &message = mockMeshService->messages_.front();
@@ -541,7 +556,7 @@ void test_proxyToMeshServiceEncrypted(void)
     moduleConfig.mqtt.encryption_enabled = true;
     MQTTUnitTest::restart();
 
-    mqtt->onSend(encrypted, decoded, 0);
+    mqtt->onSend(encrypted, decodedBroadcast, 0);
 
     TEST_ASSERT_EQUAL(1, mockMeshService->messages_.size());
     const meshtastic_MqttClientProxyMessage &message = mockMeshService->messages_.front();
@@ -555,7 +570,7 @@ void test_proxyToMeshServiceEncrypted(void)
 // A packet without the OK to MQTT bit set should not be published to a public server.
 void test_dontMqttMeOnPublicServer(void)
 {
-    meshtastic_MeshPacket p = decoded;
+    meshtastic_MeshPacket p = decodedBroadcast;
     p.decoded.bitfield = 0;
     p.decoded.has_bitfield = 0;
 
@@ -580,7 +595,7 @@ void test_okToMqttOnPrivateServer(void)
     TEST_ASSERT_TRUE(loopUntil([] { return unitTest->getPubSub().connected(); }));
 
     // Send the same packet as test_dontMqttMeOnPublicServer.
-    meshtastic_MeshPacket p = decoded;
+    meshtastic_MeshPacket p = decodedBroadcast;
     p.decoded.bitfield = 0;
     p.decoded.has_bitfield = 0;
 
@@ -611,6 +626,99 @@ void test_noDetectionSensorAppOnDefaultServer(void)
     TEST_ASSERT_TRUE(pubsub->published_.empty());
 }
 
+// A traceroute is always unicast, on a channel key: uplinked like the channel's broadcasts, plain or encrypted.
+void test_tracerouteUnicastIsUplinked(void)
+{
+    for (const bool encryption : {false, true}) {
+        moduleConfig.mqtt.encryption_enabled = encryption;
+        pubsub->published_.clear();
+        meshtastic_MeshPacket p = decoded;
+        p.decoded.portnum = meshtastic_PortNum_TRACEROUTE_APP;
+
+        mqtt->onSend(encrypted, p, 0);
+
+        TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+        TEST_ASSERT_EQUAL_STRING("msh/2/e/test/!12345678", pubsub->published_.front().first.c_str());
+    }
+}
+
+// Channel-key text DMs, ours or another node's, plain or compressed, are uplinked only if USERPREFS_UPLINK_DMS
+// asks - in plaintext and as channel ciphertext alike.
+static void checkTextDmFollowsUserPref(NodeNum from)
+{
+    for (const bool encryption : {false, true}) {
+        for (const meshtastic_PortNum port :
+             {meshtastic_PortNum_TEXT_MESSAGE_APP, meshtastic_PortNum_TEXT_MESSAGE_COMPRESSED_APP}) {
+            moduleConfig.mqtt.encryption_enabled = encryption;
+            pubsub->published_.clear();
+            meshtastic_MeshPacket p = decoded;
+            p.from = from;
+            p.decoded.portnum = port;
+
+            mqtt->onSend(encrypted, p, 0);
+
+#if USERPREFS_UPLINK_DMS
+            TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+#else
+            TEST_ASSERT_TRUE(pubsub->published_.empty());
+#endif
+        }
+    }
+}
+
+void test_ownTextDmFollowsUserPref(void)
+{
+    checkTextDmFollowsUserPref(myNodeInfo.my_node_num);
+}
+
+void test_othersTextDmFollowsUserPref(void)
+{
+    checkTextDmFollowsUserPref(decoded.from);
+}
+
+// With MQTT encryption off, a PKI DM we decrypted goes out in plaintext on the PKI topic only if USERPREFS_UPLINK_DMS asks.
+void test_pkiDmPlaintextFollowsUserPref(void)
+{
+    meshtastic_MeshPacket p = decoded;
+    p.pki_encrypted = true;
+
+    mqtt->onSend(encrypted, p, 0);
+
+#if USERPREFS_UPLINK_DMS
+    TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+    const auto &[topic, payload] = pubsub->published_.front();
+    const DecodedServiceEnvelope &env = std::get<DecodedServiceEnvelope>(payload);
+    TEST_ASSERT_EQUAL_STRING("msh/2/e/PKI/!12345678", topic.c_str());
+    TEST_ASSERT_TRUE(env.validDecode);
+    TEST_ASSERT_EQUAL(decoded.id, env.packet->id);
+#else
+    TEST_ASSERT_TRUE(pubsub->published_.empty());
+#endif
+}
+
+// With MQTT encryption on, a PKI DM goes out as ciphertext on the PKI topic only if USERPREFS_UPLINK_DMS asks.
+void test_pkiDmCiphertextFollowsUserPref(void)
+{
+    moduleConfig.mqtt.encryption_enabled = true;
+    meshtastic_MeshPacket p = decoded;
+    meshtastic_MeshPacket encryptedPki = encrypted;
+    p.pki_encrypted = true;
+    encryptedPki.pki_encrypted = true;
+
+    mqtt->onSend(encryptedPki, p, 0);
+
+#if USERPREFS_UPLINK_DMS
+    TEST_ASSERT_EQUAL(1, pubsub->published_.size());
+    const auto &[topic, payload] = pubsub->published_.front();
+    const DecodedServiceEnvelope &env = std::get<DecodedServiceEnvelope>(payload);
+    TEST_ASSERT_EQUAL_STRING("msh/2/e/PKI/!12345678", topic.c_str());
+    TEST_ASSERT_TRUE(env.validDecode);
+    TEST_ASSERT_EQUAL(encrypted.id, env.packet->id);
+#else
+    TEST_ASSERT_TRUE(pubsub->published_.empty());
+#endif
+}
+
 // Test that a MeshPacket is queued while the MQTT server is disconnected.
 void test_sendQueued(void)
 {
@@ -620,7 +728,7 @@ void test_sendQueued(void)
     TEST_ASSERT_TRUE(loopUntil([] { return !unitTest->getPubSub().connected(); }));
 
     // Send while disconnected.
-    mqtt->onSend(encrypted, decoded, 0);
+    mqtt->onSend(encrypted, decodedBroadcast, 0);
     TEST_ASSERT_EQUAL(1, unitTest->queueSize());
     TEST_ASSERT_TRUE(pubsub->published_.empty());
     TEST_ASSERT_FALSE(unitTest->getPubSub().connected());
@@ -1440,7 +1548,7 @@ void test_rootChange_rebuildsTopics(void)
     strcpy(moduleConfig.mqtt.root, "msh/EU_868");
     pubsub->subscriptions_.clear();
     pubsub->published_.clear();
-    mqtt->onSend(encrypted, decoded, 0);
+    mqtt->onSend(encrypted, decodedBroadcast, 0);
 
     // Subscriptions are refreshed, and the uplink is published under the new root after the reconnect.
     TEST_ASSERT_TRUE(loopUntil([] {
@@ -1642,6 +1750,11 @@ void setup()
     RUN_TEST(test_okToMqttOnPrivateServer);
     RUN_TEST(test_noRangeTestAppOnDefaultServer);
     RUN_TEST(test_noDetectionSensorAppOnDefaultServer);
+    RUN_TEST(test_tracerouteUnicastIsUplinked);
+    RUN_TEST(test_ownTextDmFollowsUserPref);
+    RUN_TEST(test_othersTextDmFollowsUserPref);
+    RUN_TEST(test_pkiDmPlaintextFollowsUserPref);
+    RUN_TEST(test_pkiDmCiphertextFollowsUserPref);
     RUN_TEST(test_sendQueued);
     RUN_TEST(test_reconnectProxyDoesNotReconnectMqtt);
     RUN_TEST(test_receiveEmptyMeshPacket);

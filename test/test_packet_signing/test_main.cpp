@@ -2111,9 +2111,9 @@ void test_C19_proven_ack_reaches_phone_as_valid(void)
 }
 
 // C20: a PKI DM between two other nodes is opaque to us, so it takes the relay-only path, where upstream
-// uplinks it to MQTT on the PKI topic. This fork never uplinks a non-broadcast packet (MQTT::onSend), and
-// the opaque path must not get around that: the DM is relayed over LoRa and stays off MQTT.
-void test_C20_opaque_pki_dm_is_relayed_but_kept_off_mqtt(void)
+// uplinks it to MQTT on the PKI topic (MQTT encryption on). This fork uplinks PKI DMs only with
+// USERPREFS_UPLINK_DMS, and the opaque path must not get around that: the DM is relayed over LoRa either way.
+void test_C20_opaque_pki_dm_is_relayed_and_uplinked_only_on_request(void)
 {
     moduleConfig.mqtt.enabled = true;
     moduleConfig.mqtt.encryption_enabled = true;
@@ -2134,7 +2134,11 @@ void test_C20_opaque_pki_dm_is_relayed_but_kept_off_mqtt(void)
     TEST_ASSERT_EQUAL(static_cast<int>(RoutingAuthVerdict::OPAQUE_RELAY_ONLY), static_cast<int>(passesRoutingAuthGate(&dm)));
     runPipelineIngress(dm);
     TEST_ASSERT_EQUAL_MESSAGE(1, pipelineRadio->sendCalls, "the DM is still relayed over LoRa");
-    TEST_ASSERT_EQUAL_MESSAGE(0, pipelineMqtt->queueSize(), "a DM must never be uplinked to MQTT");
+#if USERPREFS_UPLINK_DMS
+    TEST_ASSERT_EQUAL_MESSAGE(1, pipelineMqtt->queueSize(), "the DM is uplinked as ciphertext on request");
+#else
+    TEST_ASSERT_EQUAL_MESSAGE(0, pipelineMqtt->queueSize(), "a PKI DM must not be uplinked unless requested");
+#endif
     TEST_ASSERT_EQUAL(0, pipelineModule->calls);
     TEST_ASSERT_NULL(pipelineService->getForPhone());
     TEST_ASSERT_FALSE(pipelineRouter->historyContains(&dm));
@@ -2171,6 +2175,52 @@ void test_C21_pki_from_sender_with_unknown_key_is_nakked_once(void)
     p.id++;
     runPipelineIngress(p);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pipelineRouting->ackCalls, "a repeat inside the window must not be NAKed again");
+}
+
+// C22: our own DMs reach MQTT::onSend from Router::send. Without USERPREFS_UPLINK_DMS none of them is uplinked,
+// on the channel key or PKI; with it both are. Our other unicast, such as a traceroute, is uplinked either way.
+void test_C22_own_dm_uplink_needs_user_pref(void)
+{
+    moduleConfig.mqtt.enabled = true;
+    moduleConfig.mqtt.encryption_enabled = true;
+    strcpy(moduleConfig.mqtt.root, "msh");
+    channels.getByIndex(0).settings.uplink_enabled = true;
+
+    meshtastic_MeshPacket traceroute = makeDecoded(LOCAL_NODE, REMOTE_NODE, meshtastic_PortNum_TRACEROUTE_APP, SMALL_PAYLOAD);
+    traceroute.id = 0xC2200000;
+    TEST_ASSERT_EQUAL(ERRNO_OK, pipelineRouter->send(packetPool.allocCopy(traceroute)));
+    TEST_ASSERT_EQUAL_MESSAGE(1, pipelineMqtt->queueSize(), "our traceroute is uplinked");
+    pipelineMqtt->clearQueue();
+
+    // No private key yet, so the DM goes out on the channel key.
+    meshtastic_MeshPacket channelDm = makeDecoded(LOCAL_NODE, REMOTE_NODE, meshtastic_PortNum_TEXT_MESSAGE_APP, SMALL_PAYLOAD);
+    channelDm.id = 0xC2200001;
+    TEST_ASSERT_EQUAL(ERRNO_OK, pipelineRouter->send(packetPool.allocCopy(channelDm)));
+#if USERPREFS_UPLINK_DMS
+    TEST_ASSERT_EQUAL_MESSAGE(1, pipelineMqtt->queueSize(), "our channel-key DM is uplinked on request");
+#else
+    TEST_ASSERT_EQUAL_MESSAGE(0, pipelineMqtt->queueSize(), "our channel-key DM must not be uplinked unless requested");
+#endif
+    pipelineMqtt->clearQueue();
+
+    uint8_t localPub[32], localPriv[32], remotePub[32], remotePriv[32];
+    crypto->generateKeyPair(localPub, localPriv);
+    crypto->generateKeyPair(remotePub, remotePriv);
+    crypto->setDHPrivateKey(localPriv);
+    config.security.private_key.size = 32;
+    memcpy(config.security.private_key.bytes, localPriv, sizeof(localPriv));
+    mockNodeDB->addNode(REMOTE_NODE);
+    mockNodeDB->setPublicKey(REMOTE_NODE, remotePub);
+
+    meshtastic_MeshPacket pkiDm = makeDecoded(LOCAL_NODE, REMOTE_NODE, meshtastic_PortNum_TEXT_MESSAGE_APP, SMALL_PAYLOAD);
+    pkiDm.id = 0xC2200002;
+    TEST_ASSERT_EQUAL(ERRNO_OK, pipelineRouter->send(packetPool.allocCopy(pkiDm)));
+    TEST_ASSERT_EQUAL_MESSAGE(3, pipelineRadio->sendCalls, "all three go out over LoRa");
+#if USERPREFS_UPLINK_DMS
+    TEST_ASSERT_EQUAL_MESSAGE(1, pipelineMqtt->queueSize(), "our PKI DM is uplinked on request");
+#else
+    TEST_ASSERT_EQUAL_MESSAGE(0, pipelineMqtt->queueSize(), "our PKI DM must not be uplinked unless requested");
+#endif
 }
 
 // C5: the packet survives (C4) but the identity claim inside it must not land - the pubkey guard
@@ -2862,8 +2912,9 @@ void setup()
     RUN_TEST(test_C17_colliding_channel_hash_foreign_broadcast_is_relay_only);
     RUN_TEST(test_C18_inbound_ack_proof_status_is_cleared_before_modules_and_phone);
     RUN_TEST(test_C19_proven_ack_reaches_phone_as_valid);
-    RUN_TEST(test_C20_opaque_pki_dm_is_relayed_but_kept_off_mqtt);
+    RUN_TEST(test_C20_opaque_pki_dm_is_relayed_and_uplinked_only_on_request);
     RUN_TEST(test_C21_pki_from_sender_with_unknown_key_is_nakked_once);
+    RUN_TEST(test_C22_own_dm_uplink_needs_user_pref);
     printf("\n=== Group N: NodeInfoModule authentication ===\n");
     RUN_TEST(test_N1_unsigned_nodeinfo_from_signer_dropped);
     RUN_TEST(test_N2_signed_nodeinfo_from_signer_not_dropped);
