@@ -684,19 +684,18 @@ void RadioLibInterface::setTransmitDelay()
     // So we want to make sure the other side has had a chance to reconfigure its radio.
 
     if (p->tx_after) {
-        unsigned long add_delay = isLocallyOriginated(p) ? getTxDelayMsec() : getTxDelayMsecWeighted(p);
-        unsigned long now = Time::getMillis();
-        // skipZero, not timerEndsAtMillis: this is a clamp of three candidates rather than a plain
-        // now + delay, and `if (p->tx_after)` above is the read that takes 0 as "no delay wanted" -
-        // so a recomputation landing on 0 drops the CSMA backoff and the packet goes out at once.
-        //
-        // Narrow to uint32_t BEFORE skipZero, not after: add_delay is unsigned long, 64-bit on the
-        // portduino host, so the clamp can exceed UINT32_MAX there. skipZero on the wide value would
-        // pass 0x100000000 through as non-zero and the store to this uint32_t field would truncate it
-        // back to the 0 being avoided.
-        p->tx_after = Time::skipZero(
-            (uint32_t)min(max(p->tx_after + add_delay, now + add_delay), now + 2 * getTxDelayMsecWeightedWorst(p->rx_snr)));
-        scheduleTransmitDelayCompleted(p->tx_after - now);
+        // A late packet waits out the window clampToLateRebroadcastWindow() set, which is never moved. This used to
+        // add a whole relay backoff to the deadline on every call - every RX, TX, busy look and enqueue - capped only
+        // against a `now` that moved with it, so on a channel busier than one frame per backoff the deadline outran
+        // the clock: late packets stayed queued for many minutes and the full queue dropped fresh traffic behind them.
+        const uint32_t now = Time::getMillis();
+        if (!Throttle::deadlinePassedAt(now, p->tx_after)) {
+            scheduleTransmitDelayCompleted(p->tx_after - now);
+        } else {
+            // The window is over and every other relay has had its turn, so only a plain channel-utilization
+            // backoff is left - drawn afresh each time the channel was busy, as for a packet of our own.
+            scheduleTransmitDelayCompleted(getTxDelayMsec());
+        }
     } else if (isLocallyOriginated(p)) {
         // Our own packet, so nothing to defer to: just the plain channel-utilization backoff.
         startTransmitTimer(true);

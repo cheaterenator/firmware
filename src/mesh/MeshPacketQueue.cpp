@@ -6,6 +6,7 @@
 #include <assert.h>
 
 #include <algorithm>
+#include <iterator>
 
 /// @return the priority of the specified packet
 inline uint32_t getPriority(const meshtastic_MeshPacket *p)
@@ -147,73 +148,57 @@ bool MeshPacketQueue::find(const NodeNum from, const PacketId id)
 }
 
 /**
- * Attempt to find a lower-priority packet in the queue and replace it with the provided one.
+ * Whether the late packet 'q' may give up its TX queue slot to 'p'. Another node has already put a late packet on air,
+ * so ours is only a second copy and the cheapest packet to lose - but never to a less important one.
+ */
+static bool lateYieldsTo(const meshtastic_MeshPacket *q, const meshtastic_MeshPacket *p, uint32_t now)
+{
+    if (q->priority > p->priority)
+        return false;
+    if (!p->tx_after || q->priority < p->priority)
+        return true; // nobody has relayed 'p' yet, or it matters more
+    // Both late at one priority: keep whichever is due first. Elapsed times only order two deadlines that have both
+    // passed: a future one subtracts to a near-2^32 elapsed and would read as the most overdue packet in the queue.
+    return Throttle::deadlinePassedAt(now, q->tx_after) && Throttle::deadlinePassedAt(now, p->tx_after) &&
+           (uint32_t)(now - q->tx_after) < (uint32_t)(now - p->tx_after);
+}
+
+/**
+ * Attempt to find a packet in the queue to give up for the provided one, and replace it: a late packet of the same or
+ * lower priority first, and only then a lower-priority packet nobody has relayed yet.
  * @return True if the replacement succeeded, false otherwise
  */
 bool MeshPacketQueue::replaceLowerPriorityPacket(meshtastic_MeshPacket *p)
 {
-
-    if (queue.empty()) {
-        return false; // No packets to replace
-    }
-
-    // Check if the packet at the back has a lower priority than the new packet
-    auto *backPacket = queue.back();
-    if (!backPacket->tx_after && backPacket->priority < p->priority) {
-        LOG_WARN("Dropping packet 0x%08x to make room in the TX queue for higher-priority packet 0x%08x", backPacket->id, p->id);
-        // Remove the back packet
-        queue.pop_back();
-        packetPool.release(backPacket);
+    auto replace = [&](std::vector<meshtastic_MeshPacket *>::reverse_iterator it) {
+        meshtastic_MeshPacket *victim = *it;
+        queue.erase(std::next(it).base());
+        packetPool.release(victim);
         // Insert the new packet in the correct order
         enqueue(p);
         return true;
-    }
+    };
 
-    if (backPacket->tx_after) {
-        // Check if there's a non-late packet with lower priority
-        auto it = queue.end();
-        auto refPacket = *--it;
-        for (; refPacket->tx_after && it != queue.begin(); refPacket = *--it)
-            ;
-        if (!refPacket->tx_after && refPacket->priority < p->priority) {
-            LOG_WARN("Dropping non-late packet 0x%08x to make room in the TX queue for higher-priority packet 0x%08x",
-                     refPacket->id, p->id);
-            queue.erase(it);
-            packetPool.release(refPacket);
-            // Insert the new packet in the correct order
-            enqueue(p);
-            return true;
+    // Every late packet is a candidate, not only the back one: that is the one clamped last, so the likeliest to still
+    // be inside its window. Searched from the back, so the lowest-priority one goes.
+    const uint32_t now = Time::getMillis();
+    for (auto it = queue.rbegin(); it != queue.rend(); ++it) {
+        if ((*it)->tx_after && lateYieldsTo(*it, p, now)) {
+            LOG_WARN("Dropping late packet 0x%08x with TX delay %dms to make room in the TX queue for packet 0x%08x", (*it)->id,
+                     (int32_t)((*it)->tx_after - now), p->id);
+            return replace(it);
         }
     }
 
-    if (backPacket->tx_after) {
-        // Check if there's a late packet at the queue end
-        const uint32_t now = Time::getMillis();
-        // Elapsed times only order two deadlines that have both passed: a future one subtracts to a
-        // near-2^32 elapsed and would read as the most overdue packet in the queue.
-        const uint32_t backElapsed = now - backPacket->tx_after;
-        const bool newGoesFirst =
-            !p->tx_after || (Throttle::deadlinePassedAt(now, p->tx_after) && backElapsed < (uint32_t)(now - p->tx_after));
-        if (Throttle::deadlinePassedAt(now, backPacket->tx_after) && newGoesFirst) {
-            int32_t dt = -(int32_t)backElapsed;
-            if (p->tx_after) {
-                LOG_WARN("Dropping late packet 0x%08x with TX delay %dms to make room in the TX queue for packet 0x%08x with "
-                         "TX delay %ums",
-                         backPacket->id, dt, p->id, p->tx_after - now);
-
-            } else {
-                LOG_WARN("Dropping late packet 0x%08x with TX delay %dms to make room in the TX queue for packet 0x%08x "
-                         "with no TX delay",
-                         backPacket->id, dt, p->id);
-            }
-            queue.pop_back();
-            packetPool.release(backPacket);
-            // Insert the new packet in the correct order
-            enqueue(p);
-            return true;
-        }
+    // The last packet that is not late is the lowest-priority one of them
+    for (auto it = queue.rbegin(); it != queue.rend(); ++it) {
+        if ((*it)->tx_after)
+            continue;
+        if ((*it)->priority >= p->priority)
+            return false;
+        LOG_WARN("Dropping packet 0x%08x to make room in the TX queue for higher-priority packet 0x%08x", (*it)->id, p->id);
+        return replace(it);
     }
 
-    // If the back packet's priority is not lower, no replacement occurs
     return false;
 }

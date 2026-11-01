@@ -1311,6 +1311,55 @@ static void test_cadHandoffRxEnded_falseWithoutAHandoff()
     delete radioIf;
 }
 
+// ---------------------------------------------------------------------------
+// The late rebroadcast window. clampToLateRebroadcastWindow() gives a queued relay another node has already
+// put on air a deadline, and setTransmitDelay() used to add a whole relay backoff to it every time it ran - on
+// every RX, TX, busy look and enqueue - capped only against a `now` that moved with it. On a channel busier than
+// one frame per backoff the deadline outran the clock, and ROUTER_LATE's queue filled with packets that never left.
+// ---------------------------------------------------------------------------
+
+static meshtastic_MeshPacket *makeLateRelay(PacketId id, uint32_t txAfter, meshtastic_MeshPacket_Priority priority)
+{
+    meshtastic_MeshPacket *p = packetPool.allocZeroed();
+    TEST_ASSERT_NOT_NULL(p);
+    p->from = 0x22222222;
+    p->id = id;
+    p->transport_mechanism = meshtastic_MeshPacket_TransportMechanism_TRANSPORT_LORA;
+    p->rx_snr = 12; // the widest relay backoff, which pushed the deadline furthest
+    p->rx_rssi = -60;
+    p->priority = priority;
+    p->tx_after = txAfter;
+    return p;
+}
+
+static void test_lateWindowIsNotPushedOutByChannelActivity()
+{
+    const bool previousTxEnabled = config.lora.tx_enabled;
+    config.lora.tx_enabled = true;
+    auto *radioIf = makeTestableRadioLibInterface();
+
+    Time::setTestMillis(1000);
+    meshtastic_MeshPacket *late = makeLateRelay(0x0A000001, 5000, meshtastic_MeshPacket_Priority_DEFAULT);
+    TEST_ASSERT_EQUAL(ERRNO_OK, radioIf->send(late));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(5000, late->tx_after, "queueing must not move the window");
+
+    // Every send() runs setTransmitDelay() on the front packet - the first late one, as the rest sort behind it.
+    // Through the deadline and past it, half a second apart: busier than any relay backoff. Each priority is
+    // lower than the last, so the queue orders them without a tie, which would ask NodeDB (absent here) isFromUs().
+    for (uint32_t i = 1; i <= 10; i++) {
+        Time::setTestMillis(1000 + i * 500);
+        const auto priority = (meshtastic_MeshPacket_Priority)(meshtastic_MeshPacket_Priority_DEFAULT - i);
+        TEST_ASSERT_EQUAL(ERRNO_OK, radioIf->send(makeLateRelay(0x0A000001 + i, 20000, priority)));
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(5000, late->tx_after, "channel activity must not move the window");
+    }
+
+    for (uint32_t i = 0; i <= 10; i++)
+        TEST_ASSERT_TRUE(radioIf->cancelSending(0x22222222, 0x0A000001 + i)); // all still queued; frees them
+    Time::useRealClock();
+    delete radioIf;
+    config.lora.tx_enabled = previousTxEnabled;
+}
+
 void setup()
 {
     delay(10);
@@ -1367,6 +1416,7 @@ void setup()
     RUN_TEST(test_cadHandoffRxEnded_everyFramelessEndCounts);
     RUN_TEST(test_cadHandoffRxEnded_anRxStillRunningDoesNotCount);
     RUN_TEST(test_cadHandoffRxEnded_falseWithoutAHandoff);
+    RUN_TEST(test_lateWindowIsNotPushedOutByChannelActivity);
     RUN_TEST(test_preambleHold_isSizedForTheWorstCaseFrame);
     RUN_TEST(test_preambleHold_fallsBackWhenTheRadioCannotTimeTheFrame);
     RUN_TEST(test_preambleHold_fallbackIsScaledToTheWorstCaseCodingRate);

@@ -12,7 +12,8 @@ class MeshPacketQueue
     size_t maxLen;
     std::vector<meshtastic_MeshPacket *> queue;
 
-    /** Replace a lower priority package in the queue with 'mp' (provided there are lower pri packages). Return true if replaced.
+    /** Replace a packet in the queue with 'mp': a late packet of the same or lower priority first, then a lower-priority one
+     * nobody has relayed yet. Return true if replaced.
      */
     bool replaceLowerPriorityPacket(meshtastic_MeshPacket *mp);
 
