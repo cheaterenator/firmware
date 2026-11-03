@@ -1420,6 +1420,9 @@ extern meshtastic_DeviceMetadata getDeviceMetadata()
     deviceMetadata.device_state_version = DEVICESTATE_CUR_VER;
     deviceMetadata.canShutdown = pmu_found || HAS_CPU_SHUTDOWN;
     deviceMetadata.hasBluetooth = HAS_BLUETOOTH;
+    uint8_t bleAddr[6];
+    if (deviceMetadata.hasBluetooth && getBluetoothAddr(bleAddr))
+        formatMacAddr(bleAddr, deviceMetadata.ble_address, sizeof(deviceMetadata.ble_address));
     deviceMetadata.hasWifi = HAS_WIFI;
     deviceMetadata.hasEthernet = HAS_ETHERNET;
     deviceMetadata.role = config.device.role;
