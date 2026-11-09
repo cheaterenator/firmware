@@ -54,8 +54,18 @@ typedef enum _meshtastic_OnDemandType {
  these answers with response_type UNKNOWN_TYPE. */
     meshtastic_OnDemandType_REQUEST_LOCAL_STATS_BROADCAST_CONFIG = 30,
     meshtastic_OnDemandType_RESPONSE_LOCAL_STATS_BROADCAST_CONFIG = 31,
-    meshtastic_OnDemandType_REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG = 32
+    meshtastic_OnDemandType_REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG = 32,
+    /* Get this node's LAN address and UDP/MQTT switches (see LanStats above). Answered for any node
+ in range. A node that predates these answers with response_type UNKNOWN_TYPE. */
+    meshtastic_OnDemandType_REQUEST_LAN_STATS = 33,
+    meshtastic_OnDemandType_RESPONSE_LAN_STATS = 34
 } meshtastic_OnDemandType;
+
+typedef enum _meshtastic_LanStats_Link {
+    meshtastic_LanStats_Link_NONE = 0,
+    meshtastic_LanStats_Link_WIFI = 1,
+    meshtastic_LanStats_Link_ETHERNET = 2
+} meshtastic_LanStats_Link;
 
 /* Struct definitions */
 typedef struct _meshtastic_FwPlusVersion {
@@ -243,6 +253,23 @@ typedef struct _meshtastic_LocalStatsBroadcastConfig {
     uint32_t local_stats_extended_interval_secs;
 } meshtastic_LocalStatsBroadcastConfig;
 
+/* This node's LAN address and whether it bridges the mesh onto that LAN (see
+ OnDemandType.REQUEST_LAN_STATS below). */
+typedef struct _meshtastic_LanStats {
+    /* IPv4 address on `link`, first octet in the lowest byte (192.168.1.10 = 0x0A01A8C0) - the same
+ layout as DeviceConnectionStatus' ip_address. Absent while no link has an address. */
+    bool has_ip_address;
+    uint32_t ip_address;
+    /* Link ip_address belongs to: Ethernet when it is up, else Wi-Fi station. NONE when ip_address is absent. */
+    meshtastic_LanStats_Link link;
+    /* config.network.enabled_protocols has UDP_BROADCAST, and this build supports UDP multicast. */
+    bool udp_enabled;
+    /* moduleConfig.mqtt.enabled, and this build supports MQTT. */
+    bool mqtt_enabled;
+    /* Connected to the MQTT broker over this node's own network link (not proxied through the phone). */
+    bool mqtt_connected;
+} meshtastic_LanStats;
+
 typedef struct _meshtastic_OnDemandRequest {
     meshtastic_OnDemandType request_type;
     /* Only present (and only consulted) when request_type == REQUEST_SET_NODE_STATS_BROADCAST_CONFIG. */
@@ -275,6 +302,7 @@ typedef struct _meshtastic_OnDemandResponse {
         meshtastic_SnifferState sniffer_state;
         meshtastic_NodeStatsBroadcastConfig node_stats_broadcast_config;
         meshtastic_LocalStatsBroadcastConfig local_stats_broadcast_config;
+        meshtastic_LanStats lan_stats;
     } response_data;
 } meshtastic_OnDemandResponse;
 
@@ -297,8 +325,12 @@ extern "C" {
 
 /* Helper constants for enums */
 #define _meshtastic_OnDemandType_MIN meshtastic_OnDemandType_UNKNOWN_TYPE
-#define _meshtastic_OnDemandType_MAX meshtastic_OnDemandType_REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG
-#define _meshtastic_OnDemandType_ARRAYSIZE ((meshtastic_OnDemandType)(meshtastic_OnDemandType_REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG+1))
+#define _meshtastic_OnDemandType_MAX meshtastic_OnDemandType_RESPONSE_LAN_STATS
+#define _meshtastic_OnDemandType_ARRAYSIZE ((meshtastic_OnDemandType)(meshtastic_OnDemandType_RESPONSE_LAN_STATS+1))
+
+#define _meshtastic_LanStats_Link_MIN meshtastic_LanStats_Link_NONE
+#define _meshtastic_LanStats_Link_MAX meshtastic_LanStats_Link_ETHERNET
+#define _meshtastic_LanStats_Link_ARRAYSIZE ((meshtastic_LanStats_Link)(meshtastic_LanStats_Link_ETHERNET+1))
 
 
 
@@ -316,6 +348,8 @@ extern "C" {
 
 
 
+
+#define meshtastic_LanStats_link_ENUMTYPE meshtastic_LanStats_Link
 
 #define meshtastic_OnDemandRequest_request_type_ENUMTYPE meshtastic_OnDemandType
 
@@ -342,6 +376,7 @@ extern "C" {
 #define meshtastic_Ping_init_default             {false, 0, false, 0, false, 0}
 #define meshtastic_NodeStatsBroadcastConfig_init_default {0, 0}
 #define meshtastic_LocalStatsBroadcastConfig_init_default {0, 0, 0, 0}
+#define meshtastic_LanStats_init_default         {false, 0, _meshtastic_LanStats_Link_MIN, 0, 0, 0}
 #define meshtastic_OnDemandRequest_init_default  {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_default, false, meshtastic_LocalStatsBroadcastConfig_init_default}
 #define meshtastic_SnifferState_init_default     {0}
 #define meshtastic_OnDemandResponse_init_default {_meshtastic_OnDemandType_MIN, 0, {meshtastic_RxPacketHistory_init_default}}
@@ -363,6 +398,7 @@ extern "C" {
 #define meshtastic_Ping_init_zero                {false, 0, false, 0, false, 0}
 #define meshtastic_NodeStatsBroadcastConfig_init_zero {0, 0}
 #define meshtastic_LocalStatsBroadcastConfig_init_zero {0, 0, 0, 0}
+#define meshtastic_LanStats_init_zero            {false, 0, _meshtastic_LanStats_Link_MIN, 0, 0, 0}
 #define meshtastic_OnDemandRequest_init_zero     {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_zero, false, meshtastic_LocalStatsBroadcastConfig_init_zero}
 #define meshtastic_SnifferState_init_zero        {0}
 #define meshtastic_OnDemandResponse_init_zero    {_meshtastic_OnDemandType_MIN, 0, {meshtastic_RxPacketHistory_init_zero}}
@@ -440,6 +476,11 @@ extern "C" {
 #define meshtastic_LocalStatsBroadcastConfig_local_stats_interval_secs_tag 2
 #define meshtastic_LocalStatsBroadcastConfig_local_stats_extended_enabled_tag 3
 #define meshtastic_LocalStatsBroadcastConfig_local_stats_extended_interval_secs_tag 4
+#define meshtastic_LanStats_ip_address_tag       1
+#define meshtastic_LanStats_link_tag             2
+#define meshtastic_LanStats_udp_enabled_tag      3
+#define meshtastic_LanStats_mqtt_enabled_tag     4
+#define meshtastic_LanStats_mqtt_connected_tag   5
 #define meshtastic_OnDemandRequest_request_type_tag 1
 #define meshtastic_OnDemandRequest_node_stats_broadcast_config_tag 2
 #define meshtastic_OnDemandRequest_local_stats_broadcast_config_tag 3
@@ -458,6 +499,7 @@ extern "C" {
 #define meshtastic_OnDemandResponse_sniffer_state_tag 12
 #define meshtastic_OnDemandResponse_node_stats_broadcast_config_tag 13
 #define meshtastic_OnDemandResponse_local_stats_broadcast_config_tag 14
+#define meshtastic_OnDemandResponse_lan_stats_tag 15
 #define meshtastic_OnDemand_packet_index_tag     1
 #define meshtastic_OnDemand_packet_total_tag     2
 #define meshtastic_OnDemand_request_tag          3
@@ -608,6 +650,15 @@ X(a, STATIC,   SINGULAR, UINT32,   local_stats_extended_interval_secs,   4)
 #define meshtastic_LocalStatsBroadcastConfig_CALLBACK NULL
 #define meshtastic_LocalStatsBroadcastConfig_DEFAULT NULL
 
+#define meshtastic_LanStats_FIELDLIST(X, a) \
+X(a, STATIC,   OPTIONAL, FIXED32,  ip_address,        1) \
+X(a, STATIC,   SINGULAR, UENUM,    link,              2) \
+X(a, STATIC,   SINGULAR, BOOL,     udp_enabled,       3) \
+X(a, STATIC,   SINGULAR, BOOL,     mqtt_enabled,      4) \
+X(a, STATIC,   SINGULAR, BOOL,     mqtt_connected,    5)
+#define meshtastic_LanStats_CALLBACK NULL
+#define meshtastic_LanStats_DEFAULT NULL
+
 #define meshtastic_OnDemandRequest_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    request_type,      1) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  node_stats_broadcast_config,   2) \
@@ -636,7 +687,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,fw_plus_version,response_data.
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,routing_errors,response_data.routing_errors),  11) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,sniffer_state,response_data.sniffer_state),  12) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,node_stats_broadcast_config,response_data.node_stats_broadcast_config),  13) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,local_stats_broadcast_config,response_data.local_stats_broadcast_config),  14)
+X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,local_stats_broadcast_config,response_data.local_stats_broadcast_config),  14) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,lan_stats,response_data.lan_stats),  15)
 #define meshtastic_OnDemandResponse_CALLBACK NULL
 #define meshtastic_OnDemandResponse_DEFAULT NULL
 #define meshtastic_OnDemandResponse_response_data_rx_packet_history_MSGTYPE meshtastic_RxPacketHistory
@@ -652,6 +704,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,local_stats_broadcast_config,r
 #define meshtastic_OnDemandResponse_response_data_sniffer_state_MSGTYPE meshtastic_SnifferState
 #define meshtastic_OnDemandResponse_response_data_node_stats_broadcast_config_MSGTYPE meshtastic_NodeStatsBroadcastConfig
 #define meshtastic_OnDemandResponse_response_data_local_stats_broadcast_config_MSGTYPE meshtastic_LocalStatsBroadcastConfig
+#define meshtastic_OnDemandResponse_response_data_lan_stats_MSGTYPE meshtastic_LanStats
 
 #define meshtastic_OnDemand_FIELDLIST(X, a) \
 X(a, STATIC,   OPTIONAL, UINT32,   packet_index,      1) \
@@ -680,6 +733,7 @@ extern const pb_msgdesc_t meshtastic_NodesList_msg;
 extern const pb_msgdesc_t meshtastic_Ping_msg;
 extern const pb_msgdesc_t meshtastic_NodeStatsBroadcastConfig_msg;
 extern const pb_msgdesc_t meshtastic_LocalStatsBroadcastConfig_msg;
+extern const pb_msgdesc_t meshtastic_LanStats_msg;
 extern const pb_msgdesc_t meshtastic_OnDemandRequest_msg;
 extern const pb_msgdesc_t meshtastic_SnifferState_msg;
 extern const pb_msgdesc_t meshtastic_OnDemandResponse_msg;
@@ -703,6 +757,7 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_Ping_fields &meshtastic_Ping_msg
 #define meshtastic_NodeStatsBroadcastConfig_fields &meshtastic_NodeStatsBroadcastConfig_msg
 #define meshtastic_LocalStatsBroadcastConfig_fields &meshtastic_LocalStatsBroadcastConfig_msg
+#define meshtastic_LanStats_fields &meshtastic_LanStats_msg
 #define meshtastic_OnDemandRequest_fields &meshtastic_OnDemandRequest_msg
 #define meshtastic_SnifferState_fields &meshtastic_SnifferState_msg
 #define meshtastic_OnDemandResponse_fields &meshtastic_OnDemandResponse_msg
@@ -715,6 +770,7 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_ExchangeEntry_size            18
 #define meshtastic_ExchangeList_size             240
 #define meshtastic_FwPlusVersion_size            6
+#define meshtastic_LanStats_size                 13
 #define meshtastic_LocalStatsBroadcastConfig_size 16
 #define meshtastic_NodeEntry_size                69
 #define meshtastic_NodeStatsBroadcastConfig_size 8

@@ -23,6 +23,12 @@
 #if HAS_WIFI && !defined(ARCH_PORTDUINO)
 #include "mesh/wifi/WiFiAPClient.h"
 #endif
+#if HAS_ETHERNET && defined(ETH_SHARED_SPI)
+#include "platform/esp32/SharedBusEthernet.h"
+#endif
+#if !MESHTASTIC_EXCLUDE_MQTT
+#include "mqtt/MQTT.h"
+#endif
 
 OnDemandModule *onDemandModule;
 
@@ -30,10 +36,9 @@ static const size_t MAX_PACKET_SIZE = 190;
 #define NUM_ONLINE_SECS (60 * 60 * 2)
 #define ONDEMAND_MAGIC_USB_BATTERY_LEVEL 101
 // Capability signal for the companion app: bump whenever a query/command is added to this protocol so
-// the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 4 = adds
-// REQUEST_NODE_STATS_BROADCAST_CONFIG/_SET_ (periodic push of RESPONSE_NODE_STATS, see
-// applyNodeStatsBroadcastConfig()).
-#define FW_PLUS_VERSION 3
+// the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 3 = adds
+// REQUEST_(SET_)LOCAL_STATS_BROADCAST_CONFIG, 4 = adds REQUEST_LAN_STATS.
+#define FW_PLUS_VERSION 4
 
 static constexpr uint16_t TX_HISTORY_KEY_ONDEMAND_NODE_STATS = 0x8006;
 // A configured interval below this floor is clamped up - mirrors min_default_telemetry_interval_secs'
@@ -174,6 +179,9 @@ bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
             LOG_WARN("OnDemand: REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG from=0x%08x had no config payload, ignoring", mp.from);
         }
         sendPacketToRequester(prepareLocalStatsBroadcastConfig(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_LAN_STATS:
+        sendPacketToRequester(prepareLanStats(), mp);
         break;
     default: {
         meshtastic_OnDemand unknown = meshtastic_OnDemand_init_zero;
@@ -586,6 +594,51 @@ meshtastic_OnDemand OnDemandModule::prepareNodeStatsBroadcastConfig()
     onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_node_stats_broadcast_config_tag;
     onDemand.variant.response.response_data.node_stats_broadcast_config.enabled = nodeStatsBroadcastEnabled;
     onDemand.variant.response.response_data.node_stats_broadcast_config.interval_secs = nodeStatsBroadcastIntervalSecs;
+    return onDemand;
+}
+
+// First octet in the lowest byte, the layout DeviceConnectionStatus' ip_address uses. Built from the
+// octets rather than IPAddress' uint32_t conversion, which not every core's IPAddress has.
+template <typename Address> static uint32_t ipv4ToFixed32(const Address &ip)
+{
+    return (uint32_t)ip[0] | ((uint32_t)ip[1] << 8) | ((uint32_t)ip[2] << 16) | ((uint32_t)ip[3] << 24);
+}
+
+meshtastic_OnDemand OnDemandModule::prepareLanStats()
+{
+    meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
+    onDemand.which_variant = meshtastic_OnDemand_response_tag;
+    onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_LAN_STATS;
+    onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_lan_stats_tag;
+    // Zeroed for the same reason as in prepareNodeStats(): init_zero above leaves this union arm unset.
+    auto &lan = onDemand.variant.response.response_data.lan_stats;
+    memset(&lan, 0, sizeof(lan));
+
+    // Ethernet first, as UdpMulticastHandler and the WiFi screen prefer it when both are up.
+    uint32_t ip = 0;
+#if HAS_ETHERNET && (defined(USE_WS5500) || defined(USE_CH390D))
+    if (ETH.linkUp() && (ip = ipv4ToFixed32(ETH.localIP())) != 0)
+        lan.link = meshtastic_LanStats_Link_ETHERNET;
+#elif HAS_ETHERNET
+    if (Ethernet.linkStatus() == LinkON && (ip = ipv4ToFixed32(Ethernet.localIP())) != 0)
+        lan.link = meshtastic_LanStats_Link_ETHERNET;
+#endif
+#if HAS_WIFI && !defined(ARCH_PORTDUINO)
+    if (ip == 0 && WiFi.status() == WL_CONNECTED && (ip = ipv4ToFixed32(WiFi.localIP())) != 0)
+        lan.link = meshtastic_LanStats_Link_WIFI;
+#endif
+    lan.has_ip_address = ip != 0;
+    lan.ip_address = ip;
+
+#if HAS_UDP_MULTICAST
+    lan.udp_enabled = config.network.enabled_protocols & meshtastic_Config_NetworkConfig_ProtocolFlags_UDP_BROADCAST;
+#endif
+#if !MESHTASTIC_EXCLUDE_MQTT
+    lan.mqtt_enabled = moduleConfig.mqtt.enabled;
+    lan.mqtt_connected = mqtt && mqtt->isConnectedDirectly();
+#endif
+    LOG_INFO("OnDemand: LanStats response ip=%u.%u.%u.%u link=%d udp=%d mqtt=%d mqtt_connected=%d", ip & 0xff, (ip >> 8) & 0xff,
+             (ip >> 16) & 0xff, ip >> 24, (int)lan.link, lan.udp_enabled, lan.mqtt_enabled, lan.mqtt_connected);
     return onDemand;
 }
 

@@ -79,3 +79,4 @@ build/wasm-*.log
 # Private per-checkout build settings layered over userPrefs.jsonc (bin/platformio-custom.py)
 userPrefs.local.jsonc
 userPrefs.local.*.jsonc
+.vscode/extensions.json

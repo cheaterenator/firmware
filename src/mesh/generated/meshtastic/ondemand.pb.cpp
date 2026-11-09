@@ -57,6 +57,9 @@ PB_BIND(meshtastic_NodeStatsBroadcastConfig, meshtastic_NodeStatsBroadcastConfig
 PB_BIND(meshtastic_LocalStatsBroadcastConfig, meshtastic_LocalStatsBroadcastConfig, AUTO)
 
 
+PB_BIND(meshtastic_LanStats, meshtastic_LanStats, AUTO)
+
+
 PB_BIND(meshtastic_OnDemandRequest, meshtastic_OnDemandRequest, AUTO)
 
 
@@ -67,6 +70,8 @@ PB_BIND(meshtastic_OnDemandResponse, meshtastic_OnDemandResponse, 2)
 
 
 PB_BIND(meshtastic_OnDemand, meshtastic_OnDemand, 2)
+
+
 
 
 

@@ -58,6 +58,7 @@ class OnDemandModule : public ProtobufModule<meshtastic_OnDemand>, private concu
     meshtastic_OnDemand prepareFwPlusVersion();
     meshtastic_OnDemand prepareRoutingErrorResponse();
     meshtastic_OnDemand prepareSnifferState();
+    meshtastic_OnDemand prepareLanStats();
     void sendPacketToRequester(const meshtastic_OnDemand &demand_packet, const meshtastic_MeshPacket &mp, bool wantAck = true);
     bool fitsInPacket(const meshtastic_OnDemand &onDemand, size_t maxSize);
 
