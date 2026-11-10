@@ -59,6 +59,28 @@ message NodeStats {
     optional int32 ble_rssi = 38;
 }
 
+// Extended local device statistics, sent as Telemetry.local_stats_extended (oneof tag 20). Telemetry is
+// upstream's message (protobufs/ submodule), so bin/regen-protos.sh adds that oneof member to a temporary
+// copy of telemetry.proto before generating it. The same stats are also in NodeStats above: a field
+// added here is added there too.
+message LocalStatsExtended {
+    uint32 memory_free_cheap = 1;
+    uint32 memory_total = 2;
+    uint32 cpu_usage_percent = 3;
+    uint32 flash_used_bytes = 4;
+    uint32 flash_total_bytes = 5;
+    uint32 memory_psram_free = 6;
+    uint32 memory_psram_total = 7;
+    // dBm of the station link to the AP; 0 when Wi-Fi is not connected as a station
+    int32 wifi_rssi = 8;
+    // Established Wi-Fi station links lost since boot; failed (re)connect attempts don't count
+    uint32 wifi_drops = 9;
+    // ESP-IDF wifi_err_reason_t of the most recent drop counted in wifi_drops; 0 if none yet
+    uint32 wifi_drop_reason = 10;
+    // dBm at which this node hears the phone connected to it over BLE; 0 when none is
+    int32 ble_rssi = 11;
+}
+
 message RxPacketHistory {
     repeated uint32 rx_packet_history = 1;
 }

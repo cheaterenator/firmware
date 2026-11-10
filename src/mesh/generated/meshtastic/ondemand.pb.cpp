@@ -12,6 +12,9 @@ PB_BIND(meshtastic_FwPlusVersion, meshtastic_FwPlusVersion, AUTO)
 PB_BIND(meshtastic_NodeStats, meshtastic_NodeStats, 2)
 
 
+PB_BIND(meshtastic_LocalStatsExtended, meshtastic_LocalStatsExtended, AUTO)
+
+
 PB_BIND(meshtastic_RxPacketHistory, meshtastic_RxPacketHistory, AUTO)
 
 

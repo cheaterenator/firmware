@@ -80,3 +80,6 @@ build/wasm-*.log
 userPrefs.local.jsonc
 userPrefs.local.*.jsonc
 .vscode/extensions.json
+
+# Temporary protobufs/ copy made by bin/regen-protos.sh
+.regen-protos.*/

@@ -157,6 +157,28 @@ typedef struct _meshtastic_NodeStats {
     int32_t ble_rssi;
 } meshtastic_NodeStats;
 
+/* Extended local device statistics, sent as Telemetry.local_stats_extended (oneof tag 20). Telemetry is
+ upstream's message (protobufs/ submodule), so bin/regen-protos.sh adds that oneof member to a temporary
+ copy of telemetry.proto before generating it. The same stats are also in NodeStats above: a field
+ added here is added there too. */
+typedef struct _meshtastic_LocalStatsExtended {
+    uint32_t memory_free_cheap;
+    uint32_t memory_total;
+    uint32_t cpu_usage_percent;
+    uint32_t flash_used_bytes;
+    uint32_t flash_total_bytes;
+    uint32_t memory_psram_free;
+    uint32_t memory_psram_total;
+    /* dBm of the station link to the AP; 0 when Wi-Fi is not connected as a station */
+    int32_t wifi_rssi;
+    /* Established Wi-Fi station links lost since boot; failed (re)connect attempts don't count */
+    uint32_t wifi_drops;
+    /* ESP-IDF wifi_err_reason_t of the most recent drop counted in wifi_drops; 0 if none yet */
+    uint32_t wifi_drop_reason;
+    /* dBm at which this node hears the phone connected to it over BLE; 0 when none is */
+    int32_t ble_rssi;
+} meshtastic_LocalStatsExtended;
+
 typedef struct _meshtastic_RxPacketHistory {
     pb_size_t rx_packet_history_count;
     uint32_t rx_packet_history[40];
@@ -349,6 +371,7 @@ extern "C" {
 
 
 
+
 #define meshtastic_LanStats_link_ENUMTYPE meshtastic_LanStats_Link
 
 #define meshtastic_OnDemandRequest_request_type_ENUMTYPE meshtastic_OnDemandType
@@ -361,6 +384,7 @@ extern "C" {
 /* Initializer values for message structs */
 #define meshtastic_FwPlusVersion_init_default    {0}
 #define meshtastic_NodeStats_init_default        {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, "", false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
+#define meshtastic_LocalStatsExtended_init_default {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_RxPacketHistory_init_default  {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_RxAvgTimeHistory_init_default {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_PortCounterEntry_init_default {0, 0}
@@ -383,6 +407,7 @@ extern "C" {
 #define meshtastic_OnDemand_init_default         {false, 0, false, 0, 0, {meshtastic_OnDemandRequest_init_default}}
 #define meshtastic_FwPlusVersion_init_zero       {0}
 #define meshtastic_NodeStats_init_zero           {false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, "", false, 0, false, 0, false, 0, false, 0, false, 0, false, 0}
+#define meshtastic_LocalStatsExtended_init_zero  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 #define meshtastic_RxPacketHistory_init_zero     {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_RxAvgTimeHistory_init_zero    {0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
 #define meshtastic_PortCounterEntry_init_zero    {0, 0}
@@ -444,6 +469,17 @@ extern "C" {
 #define meshtastic_NodeStats_wifi_drops_tag      36
 #define meshtastic_NodeStats_wifi_drop_reason_tag 37
 #define meshtastic_NodeStats_ble_rssi_tag        38
+#define meshtastic_LocalStatsExtended_memory_free_cheap_tag 1
+#define meshtastic_LocalStatsExtended_memory_total_tag 2
+#define meshtastic_LocalStatsExtended_cpu_usage_percent_tag 3
+#define meshtastic_LocalStatsExtended_flash_used_bytes_tag 4
+#define meshtastic_LocalStatsExtended_flash_total_bytes_tag 5
+#define meshtastic_LocalStatsExtended_memory_psram_free_tag 6
+#define meshtastic_LocalStatsExtended_memory_psram_total_tag 7
+#define meshtastic_LocalStatsExtended_wifi_rssi_tag 8
+#define meshtastic_LocalStatsExtended_wifi_drops_tag 9
+#define meshtastic_LocalStatsExtended_wifi_drop_reason_tag 10
+#define meshtastic_LocalStatsExtended_ble_rssi_tag 11
 #define meshtastic_RxPacketHistory_rx_packet_history_tag 1
 #define meshtastic_RxAvgTimeHistory_rx_avg_history_tag 1
 #define meshtastic_PortCounterEntry_port_tag     1
@@ -552,6 +588,21 @@ X(a, STATIC,   OPTIONAL, UINT32,   wifi_drop_reason,  37) \
 X(a, STATIC,   OPTIONAL, INT32,    ble_rssi,         38)
 #define meshtastic_NodeStats_CALLBACK NULL
 #define meshtastic_NodeStats_DEFAULT NULL
+
+#define meshtastic_LocalStatsExtended_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_free_cheap,   1) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_total,      2) \
+X(a, STATIC,   SINGULAR, UINT32,   cpu_usage_percent,   3) \
+X(a, STATIC,   SINGULAR, UINT32,   flash_used_bytes,   4) \
+X(a, STATIC,   SINGULAR, UINT32,   flash_total_bytes,   5) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_psram_free,   6) \
+X(a, STATIC,   SINGULAR, UINT32,   memory_psram_total,   7) \
+X(a, STATIC,   SINGULAR, INT32,    wifi_rssi,         8) \
+X(a, STATIC,   SINGULAR, UINT32,   wifi_drops,        9) \
+X(a, STATIC,   SINGULAR, UINT32,   wifi_drop_reason,  10) \
+X(a, STATIC,   SINGULAR, INT32,    ble_rssi,         11)
+#define meshtastic_LocalStatsExtended_CALLBACK NULL
+#define meshtastic_LocalStatsExtended_DEFAULT NULL
 
 #define meshtastic_RxPacketHistory_FIELDLIST(X, a) \
 X(a, STATIC,   REPEATED, UINT32,   rx_packet_history,   1)
@@ -718,6 +769,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (variant,response,variant.response),   4)
 
 extern const pb_msgdesc_t meshtastic_FwPlusVersion_msg;
 extern const pb_msgdesc_t meshtastic_NodeStats_msg;
+extern const pb_msgdesc_t meshtastic_LocalStatsExtended_msg;
 extern const pb_msgdesc_t meshtastic_RxPacketHistory_msg;
 extern const pb_msgdesc_t meshtastic_RxAvgTimeHistory_msg;
 extern const pb_msgdesc_t meshtastic_PortCounterEntry_msg;
@@ -742,6 +794,7 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
 #define meshtastic_FwPlusVersion_fields &meshtastic_FwPlusVersion_msg
 #define meshtastic_NodeStats_fields &meshtastic_NodeStats_msg
+#define meshtastic_LocalStatsExtended_fields &meshtastic_LocalStatsExtended_msg
 #define meshtastic_RxPacketHistory_fields &meshtastic_RxPacketHistory_msg
 #define meshtastic_RxAvgTimeHistory_fields &meshtastic_RxAvgTimeHistory_msg
 #define meshtastic_PortCounterEntry_fields &meshtastic_PortCounterEntry_msg
@@ -772,6 +825,7 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_FwPlusVersion_size            6
 #define meshtastic_LanStats_size                 13
 #define meshtastic_LocalStatsBroadcastConfig_size 16
+#define meshtastic_LocalStatsExtended_size       76
 #define meshtastic_NodeEntry_size                69
 #define meshtastic_NodeStatsBroadcastConfig_size 8
 #define meshtastic_NodeStats_size                265

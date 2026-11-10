@@ -1,10 +1,14 @@
 @ECHO OFF
 SETLOCAL
 
-cd protobufs
-..\nanopb-0.4.9\generator-bin\protoc.exe --experimental_allow_proto3_optional "--nanopb_out=-S.cpp -v:..\src\mesh\generated" -I=..\protobufs\ ..\protobufs\meshtastic\*.proto
-GOTO eof
+REM regen-protos.sh also adds Telemetry.local_stats_extended and generates protobufs-private/, so
+REM run that rather than a copy of it here. Needs Git for Windows' bash (not WSL's).
+SET "GIT_BASH=%ProgramFiles%\Git\bin\bash.exe"
+IF NOT EXIST "%GIT_BASH%" (
+    ECHO Git Bash not found at "%GIT_BASH%" - run bin/regen-protos.sh from a bash shell instead.
+    EXIT /B 1
+)
+"%GIT_BASH%" bin/regen-protos.sh
 
-:eof
 ENDLOCAL
 EXIT /B %ERRORLEVEL%
