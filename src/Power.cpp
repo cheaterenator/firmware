@@ -1319,12 +1319,22 @@ void Power::logHeapUsage()
     // The first line has no earlier sample to difference against
     const int32_t delta = lastHeapLogTime ? (int32_t)(heapFree - lastHeapLogFree) : 0;
 
+    // min only ever falls: one step down is a transient alloc, repeated new lows are a leak.
+    // A steady min with a shrinking largest block is fragmentation. Empty where unsupported.
+    char detail[64] = "";
+    const uint32_t minFree = memGet.getMinFreeHeap();
+    const uint32_t maxAlloc = memGet.getMaxAllocHeap();
+    if (minFree)
+        snprintf(detail, sizeof(detail), ", min %u, largest block %u", minFree, maxAlloc);
+    else if (maxAlloc)
+        snprintf(detail, sizeof(detail), ", largest block %u", maxAlloc);
+
     const uint32_t psramTotal = memGet.getPsramSize();
     if (psramTotal)
-        LOG_INFO("Heap: %u/%u bytes free (%d since last), PSRAM: %u/%u bytes free", heapFree, heapTotal, delta,
+        LOG_INFO("Heap: %u/%u bytes free (%d since last)%s, PSRAM: %u/%u bytes free", heapFree, heapTotal, delta, detail,
                  memGet.getFreePsram(), psramTotal);
     else
-        LOG_INFO("Heap: %u/%u bytes free (%d since last)", heapFree, heapTotal, delta);
+        LOG_INFO("Heap: %u/%u bytes free (%d since last)%s", heapFree, heapTotal, delta, detail);
 
     lastHeapLogFree = heapFree;
     lastHeapLogTime = Time::skipZero(Time::getMillis());
@@ -2132,7 +2142,7 @@ class LipoCharger : public HasBatteryLevel
     /**
      * return true if there is a battery installed in this unit
      */
-    virtual bool isBatteryConnect() override { return PPM->getBattVoltage() > 0; }
+    virtual bool isBatteryConnect() override { return getBattVoltage() > 0; }
 
     /**
      * return true if there is an external power source detected
