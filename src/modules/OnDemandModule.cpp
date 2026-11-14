@@ -4,6 +4,7 @@
 #include "FSCommon.h"
 #include "MeshService.h"
 #include "NodeDB.h"
+#include "PhoneAPI.h"
 #include "PowerStatus.h"
 #include "RadioLibInterface.h"
 #include "Router.h"
@@ -19,6 +20,7 @@
 #include "mesh/AdminKeys.h"
 #include "modules/RoutingModule.h"
 #include <cstring>
+#include <pb_decode.h>
 #include <pb_encode.h>
 #if HAS_WIFI && !defined(ARCH_PORTDUINO)
 #include "mesh/wifi/WiFiAPClient.h"
@@ -37,8 +39,9 @@ static const size_t MAX_PACKET_SIZE = 190;
 #define ONDEMAND_MAGIC_USB_BATTERY_LEVEL 101
 // Capability signal for the companion app: bump whenever a query/command is added to this protocol so
 // the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 3 = adds
-// REQUEST_(SET_)LOCAL_STATS_BROADCAST_CONFIG, 4 = adds REQUEST_LAN_STATS.
-#define FW_PLUS_VERSION 4
+// REQUEST_(SET_)LOCAL_STATS_BROADCAST_CONFIG, 4 = adds REQUEST_LAN_STATS, 5 = adds presence
+// (REQUEST_PRESENCE, REQUEST_(SET_)PRESENCE_CONFIG and the RESPONSE_PRESENCE broadcasts).
+#define FW_PLUS_VERSION 5
 
 static constexpr uint16_t TX_HISTORY_KEY_ONDEMAND_NODE_STATS = 0x8006;
 // A configured interval below this floor is clamped up - mirrors min_default_telemetry_interval_secs'
@@ -56,6 +59,16 @@ static constexpr uint32_t MAX_LOCAL_STATS_BROADCAST_INTERVAL_SECS = 30UL * 24 * 
 #ifndef USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS
 #define USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS 0
 #endif
+
+// Factory default for the presence switch, used until a REQUEST_SET_PRESENCE_CONFIG is saved.
+#ifndef USERPREFS_PRESENCE_ENABLED
+#define USERPREFS_PRESENCE_ENABLED false
+#endif
+// A presence broadcast goes out once the state has held this long (so a short Wi-Fi/BLE dropout sends
+// nothing)...
+static constexpr uint32_t PRESENCE_SETTLE_MS = 5 * 60 * 1000UL;
+// ...and no sooner than this after the previous one.
+static constexpr uint32_t PRESENCE_MIN_GAP_MS = 30 * 60 * 1000UL;
 
 // 0 = default, then the same floor as the NodeStats broadcast, and the cap above.
 static uint32_t normalizeLocalStatsIntervalSecs(uint32_t secs)
@@ -78,6 +91,10 @@ OnDemandModule::OnDemandModule() : ProtobufModule("OnDemand", meshtastic_PortNum
     localStatsBroadcastConfig.local_stats_extended_interval_secs =
         normalizeLocalStatsIntervalSecs(USERPREFS_LOCAL_STATS_EXTENDED_BROADCAST_SECS);
     loadLocalStatsBroadcastConfig();
+
+    presenceEnabled = USERPREFS_PRESENCE_ENABLED;
+    presenceChangedMs = millis();
+    loadPresenceConfig();
 }
 
 bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_OnDemand *t)
@@ -182,6 +199,31 @@ bool OnDemandModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, mes
         break;
     case meshtastic_OnDemandType_REQUEST_LAN_STATS:
         sendPacketToRequester(prepareLanStats(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_PRESENCE:
+        sendPacketToRequester(preparePresence(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_PRESENCE_CONFIG:
+        sendPacketToRequester(preparePresenceConfig(), mp);
+        break;
+    case meshtastic_OnDemandType_REQUEST_SET_PRESENCE_CONFIG:
+        // Whether this node tells the mesh when its user is around is the owner's call: same gate as
+        // REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG.
+        if (!mayChangeLocalStatsBroadcastConfig(mp)) {
+            LOG_WARN("OnDemand: ignoring REQUEST_SET_PRESENCE_CONFIG from=0x%08x pki=%d: not an admin key", mp.from,
+                     mp.pki_encrypted);
+            if (routingModule)
+                routingModule->sendAckNak(mp.pki_encrypted ? meshtastic_Routing_Error_ADMIN_PUBLIC_KEY_UNAUTHORIZED
+                                                           : meshtastic_Routing_Error_NOT_AUTHORIZED,
+                                          getFrom(&mp), mp.id, mp.channel, routingModule->getHopLimitForResponse(mp));
+            break;
+        }
+        if (t->variant.request.has_presence_config) {
+            applyPresenceConfig(t->variant.request.presence_config);
+        } else {
+            LOG_WARN("OnDemand: REQUEST_SET_PRESENCE_CONFIG from=0x%08x had no config payload, ignoring", mp.from);
+        }
+        sendPacketToRequester(preparePresenceConfig(), mp);
         break;
     default: {
         meshtastic_OnDemand unknown = meshtastic_OnDemand_init_zero;
@@ -362,6 +404,10 @@ meshtastic_OnDemand OnDemandModule::prepareNodeStats()
         s.blocked_by_hoplimit = router->blocked_by_hoplimit;
     }
     s.reboots = myNodeInfo.reboot_count;
+    // Lets a client that only sees NodeStats from a remote node (no REQUEST_FW_PLUS_VERSION round
+    // trip) tell which OnDemand requests that node answers.
+    s.has_fw_plus_version = true;
+    s.fw_plus_version = FW_PLUS_VERSION;
     s.memory_free_cheap = memGet.getFreeHeap();
     s.memory_total = memGet.getHeapSize();
     s.cpu_usage_percent = CpuHwUsagePercent;
@@ -684,6 +730,135 @@ void OnDemandModule::applyLocalStatsBroadcastConfig(const meshtastic_LocalStatsB
     saveLocalStatsBroadcastConfig();
 }
 
+meshtastic_OnDemand OnDemandModule::preparePresence()
+{
+    updatePresence();
+    meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
+    onDemand.which_variant = meshtastic_OnDemand_response_tag;
+    onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_PRESENCE;
+    onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_presence_tag;
+    // Zeroed for the same reason as in prepareNodeStats(): init_zero above leaves this union arm unset.
+    auto &presence = onDemand.variant.response.response_data.presence;
+    memset(&presence, 0, sizeof(presence));
+    // Switched off: UNKNOWN, and nothing about when the user was last around.
+    if (presenceEnabled) {
+        presence.state = presenceOnline ? meshtastic_Presence_State_ONLINE : meshtastic_Presence_State_OFFLINE;
+        presence.has_secs_since_change = true;
+        presence.secs_since_change = (millis() - presenceChangedMs) / 1000;
+    }
+    return onDemand;
+}
+
+meshtastic_OnDemand OnDemandModule::preparePresenceConfig()
+{
+    meshtastic_OnDemand onDemand = meshtastic_OnDemand_init_zero;
+    onDemand.which_variant = meshtastic_OnDemand_response_tag;
+    onDemand.variant.response.response_type = meshtastic_OnDemandType_RESPONSE_PRESENCE_CONFIG;
+    onDemand.variant.response.which_response_data = meshtastic_OnDemandResponse_presence_config_tag;
+    onDemand.variant.response.response_data.presence_config.enabled = presenceEnabled;
+    return onDemand;
+}
+
+void OnDemandModule::applyPresenceConfig(const meshtastic_PresenceConfig &cfg)
+{
+    if (cfg.enabled != presenceEnabled) {
+        // Switched on: announce the current state (PRESENCE_MIN_GAP_MS still holds). Switched off: nothing
+        // goes out, but the next switch-on announces again.
+        presenceSentState = meshtastic_Presence_State_UNKNOWN;
+    }
+    presenceEnabled = cfg.enabled;
+    LOG_INFO("OnDemand: presence config set to enabled=%d", presenceEnabled);
+    savePresenceConfig();
+}
+
+void OnDemandModule::updatePresence()
+{
+    bool online = PhoneAPI::getConnectedClientCount() > 0;
+    if (online != presenceOnline) {
+        presenceOnline = online;
+        presenceChangedMs = millis();
+        LOG_INFO("OnDemand: user presence now %s", online ? "ONLINE" : "OFFLINE");
+    }
+}
+
+bool OnDemandModule::presenceBroadcastDue(uint32_t nowMs, meshtastic_Presence_State state, meshtastic_Presence_State sentState,
+                                          uint32_t changedMs, bool everSent, uint32_t sentMs)
+{
+    // Back to what the last broadcast said (a dropout shorter than PRESENCE_SETTLE_MS): nothing to tell.
+    return state != sentState && nowMs - changedMs >= PRESENCE_SETTLE_MS && (!everSent || nowMs - sentMs >= PRESENCE_MIN_GAP_MS);
+}
+
+void OnDemandModule::runPresence()
+{
+    updatePresence();
+    if (!presenceEnabled || config.device.role == meshtastic_Config_DeviceConfig_Role_CLIENT_HIDDEN) {
+        return;
+    }
+
+    const meshtastic_Presence_State state = presenceOnline ? meshtastic_Presence_State_ONLINE : meshtastic_Presence_State_OFFLINE;
+    if (!presenceBroadcastDue(millis(), state, presenceSentState, presenceChangedMs, presenceEverSent, presenceSentMs) ||
+        !airTime->isTxAllowedChannelUtil(true) || !airTime->isTxAllowedAirUtil()) {
+        return;
+    }
+
+    meshtastic_OnDemand onDemand = preparePresence();
+    // How long the state has held only matters to someone asking (REQUEST_PRESENCE); left out here to
+    // keep the broadcast as small as it gets.
+    onDemand.variant.response.response_data.presence.has_secs_since_change = false;
+    meshtastic_MeshPacket *p = allocDataProtobuf(onDemand);
+    if (!p) {
+        LOG_WARN("OnDemand: packetPool exhausted, dropping presence broadcast");
+        return;
+    }
+    p->to = NODENUM_BROADCAST;
+    p->decoded.want_response = false;
+    p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;
+    LOG_INFO("OnDemand: broadcasting presence %s to mesh", state == meshtastic_Presence_State_ONLINE ? "ONLINE" : "OFFLINE");
+    service->sendToMesh(p, RX_SRC_LOCAL, true);
+    presenceSentState = state;
+    presenceEverSent = true;
+    presenceSentMs = millis();
+}
+
+bool OnDemandModule::isPresencePacket(const meshtastic_Data &d)
+{
+    if (d.portnum != meshtastic_PortNum_FWPLUS_APP) {
+        return false;
+    }
+    // Walks the encoding for OnDemand.response.response_type rather than decoding a whole
+    // meshtastic_OnDemand, whose largest response arm would cost several hundred bytes of stack on
+    // Router's send path.
+    pb_istream_t stream = pb_istream_from_buffer(d.payload.bytes, d.payload.size);
+    pb_wire_type_t wireType;
+    uint32_t tag;
+    bool eof;
+    while (pb_decode_tag(&stream, &wireType, &tag, &eof)) {
+        if (tag == meshtastic_OnDemand_response_tag && wireType == PB_WT_STRING) {
+            pb_istream_t response;
+            if (!pb_make_string_substream(&stream, &response)) {
+                return false;
+            }
+            bool presence = false;
+            while (pb_decode_tag(&response, &wireType, &tag, &eof)) {
+                if (tag == meshtastic_OnDemandResponse_response_type_tag && wireType == PB_WT_VARINT) {
+                    uint32_t type;
+                    presence = pb_decode_varint32(&response, &type) && type == meshtastic_OnDemandType_RESPONSE_PRESENCE;
+                    break;
+                }
+                if (!pb_skip_field(&response, wireType)) {
+                    break;
+                }
+            }
+            pb_close_string_substream(&stream, &response);
+            return presence;
+        }
+        if (!pb_skip_field(&stream, wireType)) {
+            return false;
+        }
+    }
+    return false;
+}
+
 void OnDemandModule::broadcastNodeStats()
 {
     meshtastic_MeshPacket *p = allocDataProtobuf(prepareNodeStats());
@@ -719,6 +894,18 @@ struct __attribute__((packed)) NodeStatsBroadcastConfigFile {
 constexpr const char *LOCAL_STATS_BROADCAST_CONFIG_FILENAME = "/prefs/ondemand_localstats_bcast.dat";
 constexpr uint32_t LOCAL_STATS_BROADCAST_CONFIG_MAGIC = 0x4C534243; // "LSBC"
 constexpr uint8_t LOCAL_STATS_BROADCAST_CONFIG_VERSION = 1;
+
+// Same scheme for PresenceConfig. Its file existing at all means the app has set it, so
+// USERPREFS_PRESENCE_ENABLED no longer applies.
+constexpr const char *PRESENCE_CONFIG_FILENAME = "/prefs/ondemand_presence.dat";
+constexpr uint32_t PRESENCE_CONFIG_MAGIC = 0x50525343; // "PRSC"
+constexpr uint8_t PRESENCE_CONFIG_VERSION = 1;
+
+struct __attribute__((packed)) PresenceConfigFile {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t enabled;
+};
 
 struct __attribute__((packed)) LocalStatsBroadcastConfigFile {
     uint32_t magic;
@@ -834,19 +1021,67 @@ void OnDemandModule::saveLocalStatsBroadcastConfig()
     }
     spiLock->unlock();
 }
+
+void OnDemandModule::loadPresenceConfig()
+{
+    spiLock->lock();
+    auto file = FSCom.open(PRESENCE_CONFIG_FILENAME, FILE_O_READ);
+    if (file) {
+        PresenceConfigFile stored{};
+        bool ok = file.read((uint8_t *)&stored, sizeof(stored)) == sizeof(stored);
+        if (ok && stored.magic == PRESENCE_CONFIG_MAGIC && stored.version == PRESENCE_CONFIG_VERSION) {
+            presenceEnabled = stored.enabled;
+            LOG_INFO("OnDemand: loaded presence config from disk: enabled=%d", presenceEnabled);
+        } else {
+            LOG_WARN("OnDemand: invalid presence config file, using defaults");
+        }
+        file.close();
+    } else {
+        LOG_INFO("OnDemand: no presence config file found, using defaults (enabled=%d)", presenceEnabled);
+    }
+    spiLock->unlock();
+}
+
+void OnDemandModule::savePresenceConfig()
+{
+    spiLock->lock();
+    FSCom.mkdir("/prefs");
+    if (FSCom.exists(PRESENCE_CONFIG_FILENAME)) {
+        FSCom.remove(PRESENCE_CONFIG_FILENAME);
+    }
+    auto file = FSCom.open(PRESENCE_CONFIG_FILENAME, FILE_O_WRITE);
+    if (file) {
+        PresenceConfigFile stored{};
+        stored.magic = PRESENCE_CONFIG_MAGIC;
+        stored.version = PRESENCE_CONFIG_VERSION;
+        stored.enabled = presenceEnabled;
+        file.write((uint8_t *)&stored, sizeof(stored));
+        file.flush();
+        file.close();
+        LOG_DEBUG("OnDemand: saved presence config to disk");
+    } else {
+        LOG_WARN("OnDemand: failed to open presence config file for writing");
+    }
+    spiLock->unlock();
+}
 #else
 // No filesystem available on this arch - config stays in-memory only for the boot session.
 void OnDemandModule::loadNodeStatsBroadcastConfig() {}
 void OnDemandModule::saveNodeStatsBroadcastConfig() {}
 void OnDemandModule::loadLocalStatsBroadcastConfig() {}
 void OnDemandModule::saveLocalStatsBroadcastConfig() {}
+void OnDemandModule::loadPresenceConfig() {}
+void OnDemandModule::savePresenceConfig() {}
 #endif
 
 int32_t OnDemandModule::runOnce()
 {
     // Idle poll cadence while disabled/waiting - cheap, and fine-grained enough for any interval
-    // this broadcast is configured to (floored at MIN_NODE_STATS_BROADCAST_INTERVAL_SECS minutes).
+    // this broadcast is configured to (floored at MIN_NODE_STATS_BROADCAST_INTERVAL_SECS minutes), and
+    // for presence's PRESENCE_SETTLE_MS / PRESENCE_MIN_GAP_MS.
     static constexpr int32_t POLL_MS = 60 * 1000;
+
+    runPresence();
 
     if (!nodeStatsBroadcastEnabled || config.device.role == meshtastic_Config_DeviceConfig_Role_CLIENT_HIDDEN) {
         return POLL_MS;
@@ -873,6 +1108,9 @@ void OnDemandModule::sendPacketToRequester(const meshtastic_OnDemand &demand_pac
     }
     p->to = getFrom(&mp); // mp.from is always 0 for phone-originated requests; resolve to our own node
     p->decoded.want_response = false;
+    // As setReplyTo() does for every want_response reply: lets the requester match this answer to its
+    // request, which a client talking to a remote node may need to tell it from a timeout.
+    p->decoded.request_id = mp.id;
     p->want_ack = wantAck;
     p->channel = mp.channel;
     p->priority = meshtastic_MeshPacket_Priority_BACKGROUND;

@@ -61,6 +61,18 @@ void releaseFilesManifest(std::vector<meshtastic_FileInfo> &filesManifest)
 // Flag to indicate a heartbeat was received and we should send queue status
 bool heartbeatReceived = false;
 
+// API clients attached right now, for getConnectedClientCount(). File-scope rather than a PhoneAPI member
+// for the nRF52 USB-CDC reason given at MESHTASTIC_PHONEAPI_ACCESS_CONTROL's slot tables below. Locked
+// because BLE stacks close() their PhoneAPI from their own task.
+static uint8_t g_connectedClients = 0;
+static concurrency::Lock g_connectedClientsMutex;
+
+uint8_t PhoneAPI::getConnectedClientCount()
+{
+    concurrency::LockGuard g(&g_connectedClientsMutex);
+    return g_connectedClients;
+}
+
 #ifdef MESHTASTIC_PHONEAPI_ACCESS_CONTROL
 // Auth-slot table and status-slot table are both sized to the typical
 // SerialConsole + BluetoothPhoneAPI footprint plus room for WiFi/TCP
@@ -276,6 +288,12 @@ void PhoneAPI::handleStartConfig()
     // Must be before setting state (because state is how we know !connected)
     if (!isConnected()) {
         onConnectionChanged(true);
+        // Not the on-device UI's PacketAPI: attached for as long as the node runs, it says nothing about
+        // whether the user is around.
+        if (api_type != TYPE_PACKET) {
+            concurrency::LockGuard g(&g_connectedClientsMutex);
+            g_connectedClients++;
+        }
         observe(&service->fromNumChanged);
 #ifdef FSCom
         observe(&xModem.packetReady);
@@ -389,6 +407,11 @@ void PhoneAPI::close()
         releaseMqttClientProxyPhonePacket();
         releaseClientNotification();
         onConnectionChanged(false);
+        if (api_type != TYPE_PACKET) {
+            concurrency::LockGuard g(&g_connectedClientsMutex);
+            if (g_connectedClients > 0)
+                g_connectedClients--;
+        }
         fromRadioScratch = {};
         toRadioScratch = {};
         // Clear cached node info under lock because NimBLE callbacks can still be draining it.

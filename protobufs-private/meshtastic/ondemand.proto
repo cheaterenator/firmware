@@ -188,6 +188,31 @@ message LanStats {
     bool mqtt_connected = 5;
 }
 
+// Whether this node's user is around: an API client (phone app, CLI, web client, ...) is attached to the
+// node. Sent unsolicited as RESPONSE_PRESENCE broadcasts on the primary channel while
+// PresenceConfig.enabled, and as the answer to REQUEST_PRESENCE. A broadcast goes out once the state has
+// held for 5 minutes and at least 30 minutes after the previous one, and only if it differs from what was
+// broadcast last, so a short Wi-Fi/BLE dropout sends nothing. After a boot the current state is broadcast
+// once it has held for 5 minutes. Neither the broadcasts nor the answers are offered to MQTT (ok_to_mqtt is
+// cleared, and this firmware never uplinks them).
+message Presence {
+    enum State {
+        // Presence sharing is switched off on that node (PresenceConfig.enabled false).
+        UNKNOWN = 0;
+        OFFLINE = 1;
+        ONLINE = 2;
+    }
+    State state = 1;
+    // Seconds the node has been in `state` (since boot if it never changed). Only in answers to
+    // REQUEST_PRESENCE, which report the state as it is at that moment, not the last broadcast one.
+    optional uint32 secs_since_change = 2;
+}
+
+// Switch for the Presence broadcasts and answers (see OnDemandType.REQUEST_PRESENCE_CONFIG below).
+message PresenceConfig {
+    bool enabled = 1;
+}
+
 enum OnDemandType {
     UNKNOWN_TYPE = 0;
     REQUEST_PACKET_RX_HISTORY = 1;
@@ -237,6 +262,16 @@ enum OnDemandType {
     // in range. A node that predates these answers with response_type UNKNOWN_TYPE.
     REQUEST_LAN_STATS = 33;
     RESPONSE_LAN_STATS = 34;
+    // Get this node's user presence (see Presence above). Answered for any node in range; state is
+    // UNKNOWN while presence sharing is switched off. A node that predates these answers with
+    // response_type UNKNOWN_TYPE. RESPONSE_PRESENCE is also what the unsolicited broadcasts carry.
+    REQUEST_PRESENCE = 35;
+    RESPONSE_PRESENCE = 36;
+    // Get/set the presence switch (see PresenceConfig above). GET is answered for any node in range;
+    // SET is honored on the same terms as REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG.
+    REQUEST_PRESENCE_CONFIG = 37;
+    RESPONSE_PRESENCE_CONFIG = 38;
+    REQUEST_SET_PRESENCE_CONFIG = 39;
 }
 
 message OnDemandRequest {
@@ -246,6 +281,8 @@ message OnDemandRequest {
     // Only present (and only consulted) when request_type == REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG.
     // Sets both broadcasts at once: read the current config first to change only one.
     optional LocalStatsBroadcastConfig local_stats_broadcast_config = 3;
+    // Only present (and only consulted) when request_type == REQUEST_SET_PRESENCE_CONFIG.
+    optional PresenceConfig presence_config = 4;
 }
 
 message SnifferState {
@@ -269,6 +306,8 @@ message OnDemandResponse {
         NodeStatsBroadcastConfig node_stats_broadcast_config = 13;
         LocalStatsBroadcastConfig local_stats_broadcast_config = 14;
         LanStats lan_stats = 15;
+        Presence presence = 16;
+        PresenceConfig presence_config = 17;
     }
 }
 

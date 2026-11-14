@@ -14,6 +14,7 @@
 #include "main.h"
 #include "mesh-pb-constants.h"
 #include "meshUtils.h"
+#include "modules/OnDemandModule.h"
 #include "modules/RoutingModule.h"
 #include <ErriezCRC32.h>
 #include <pb_decode.h>
@@ -1311,6 +1312,9 @@ meshtastic_Routing_Error perhapsEncode(meshtastic_MeshPacket *p)
             p->decoded.has_bitfield = true;
             p->decoded.bitfield |= (config.lora.config_ok_to_mqtt << BITFIELD_OK_TO_MQTT_SHIFT);
             p->decoded.bitfield |= (p->decoded.want_response << BITFIELD_WANT_RESPONSE_SHIFT);
+            // Fork: presence says when our user is around - never offered to MQTT, whatever ok_to_mqtt says.
+            if (OnDemandModule::isPresencePacket(p->decoded))
+                p->decoded.bitfield &= ~BITFIELD_OK_TO_MQTT_MASK;
             // We own signing for packets we originate; discard any signature a client preset.
             // Outside the XEdDSA guard: the field exists in the protobuf on every build, and a
             // stale/garbage signature transmitted by a non-signing build would hard-fail

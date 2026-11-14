@@ -39,6 +39,16 @@ class OnDemandModule : public ProtobufModule<meshtastic_OnDemand>, private concu
     // check remote admin passes (AdminModule).
     static bool mayChangeLocalStatsBroadcastConfig(const meshtastic_MeshPacket &mp);
 
+    // Whether d carries a RESPONSE_PRESENCE (a presence broadcast or an answer to REQUEST_PRESENCE). Says
+    // when someone's user is around, so Router clears ok_to_mqtt on ours and MQTT never uplinks any.
+    static bool isPresencePacket(const meshtastic_Data &d);
+
+    // Presence broadcast cadence: `state` goes out once it differs from sentState (what the last broadcast
+    // said, UNKNOWN for none), has held 5 min since changedMs, and 30 min have passed since sentMs (only
+    // counted when everSent). So a dropout shorter than 5 min sends nothing.
+    static bool presenceBroadcastDue(uint32_t nowMs, meshtastic_Presence_State state, meshtastic_Presence_State sentState,
+                                     uint32_t changedMs, bool everSent, uint32_t sentMs);
+
   protected:
     virtual bool handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_OnDemand *p) override;
     virtual meshtastic_MeshPacket *allocReply() override;
@@ -80,6 +90,23 @@ class OnDemandModule : public ProtobufModule<meshtastic_OnDemand>, private concu
 
     // Factory defaults from USERPREFS_LOCAL_STATS_(EXTENDED_)BROADCAST_SECS, set in the constructor.
     meshtastic_LocalStatsBroadcastConfig localStatsBroadcastConfig = meshtastic_LocalStatsBroadcastConfig_init_zero;
+
+    // User presence (see Presence in ondemand.proto): ONLINE while PhoneAPI counts an attached client.
+    meshtastic_OnDemand preparePresence();
+    meshtastic_OnDemand preparePresenceConfig();
+    void applyPresenceConfig(const meshtastic_PresenceConfig &cfg);
+    void loadPresenceConfig();
+    void savePresenceConfig();
+    void updatePresence();
+    void runPresence();
+
+    bool presenceEnabled = false;   // factory default from USERPREFS_PRESENCE_ENABLED, set in the constructor
+    bool presenceOnline = false;    // as of the last updatePresence()
+    uint32_t presenceChangedMs = 0; // millis() when presenceOnline last flipped, or boot
+    // What the last broadcast said; UNKNOWN = none since boot or since presence was switched on.
+    meshtastic_Presence_State presenceSentState = meshtastic_Presence_State_UNKNOWN;
+    bool presenceEverSent = false; // presenceSentMs is valid
+    uint32_t presenceSentMs = 0;
 };
 
 extern OnDemandModule *onDemandModule;

@@ -12,6 +12,7 @@
 #include "mesh/Router.h"
 #include "mesh/generated/meshtastic/mqtt.pb.h"
 #include "mesh/generated/meshtastic/telemetry.pb.h"
+#include "modules/OnDemandModule.h"
 #include "modules/RoutingModule.h"
 #if defined(ARCH_ESP32)
 #include "../mesh/generated/meshtastic/paxcount.pb.h"
@@ -765,6 +766,13 @@ void MQTT::onSend(const meshtastic_MeshPacket &mp_encrypted, const meshtastic_Me
                                     meshtastic_PortNum_TEXT_MESSAGE_COMPRESSED_APP);
     if (!USERPREFS_UPLINK_DMS && (isPkiDm || isTextDm)) {
         LOG_DEBUG("MQTT onSend - Suppress DM from uplink");
+        return;
+    }
+    // Presence (OnDemand RESPONSE_PRESENCE) says when someone's user is around: ours or anyone's, never
+    // uplinked, even to a private broker that would disregard its cleared ok_to_mqtt.
+    if (mp_decoded.which_payload_variant == meshtastic_MeshPacket_decoded_tag &&
+        OnDemandModule::isPresencePacket(mp_decoded.decoded)) {
+        LOG_DEBUG("MQTT onSend - Suppress presence from uplink");
         return;
     }
     bool uplinkEnabled = false;

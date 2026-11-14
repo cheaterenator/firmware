@@ -173,6 +173,10 @@ class PhoneAPI
     bool isConnected() { return state != STATE_SEND_NOTHING; }
     bool isSendingPackets() { return state == STATE_SEND_PACKETS; }
 
+    /// API clients (phone app, CLI, web client, ...) attached right now over any transport, counted from
+    /// their first want_config to close(). The on-device UI's PacketAPI is not counted.
+    static uint8_t getConnectedClientCount();
+
 #ifdef MESHTASTIC_PHONEAPI_ACCESS_CONTROL
     /// Per-connection auth: tracked in a small file-scope slot table keyed
     /// by PhoneAPI*. Adding state members directly to PhoneAPI broke

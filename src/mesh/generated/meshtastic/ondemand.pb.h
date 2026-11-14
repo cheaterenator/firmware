@@ -58,7 +58,17 @@ typedef enum _meshtastic_OnDemandType {
     /* Get this node's LAN address and UDP/MQTT switches (see LanStats above). Answered for any node
  in range. A node that predates these answers with response_type UNKNOWN_TYPE. */
     meshtastic_OnDemandType_REQUEST_LAN_STATS = 33,
-    meshtastic_OnDemandType_RESPONSE_LAN_STATS = 34
+    meshtastic_OnDemandType_RESPONSE_LAN_STATS = 34,
+    /* Get this node's user presence (see Presence above). Answered for any node in range; state is
+ UNKNOWN while presence sharing is switched off. A node that predates these answers with
+ response_type UNKNOWN_TYPE. RESPONSE_PRESENCE is also what the unsolicited broadcasts carry. */
+    meshtastic_OnDemandType_REQUEST_PRESENCE = 35,
+    meshtastic_OnDemandType_RESPONSE_PRESENCE = 36,
+    /* Get/set the presence switch (see PresenceConfig above). GET is answered for any node in range;
+ SET is honored on the same terms as REQUEST_SET_LOCAL_STATS_BROADCAST_CONFIG. */
+    meshtastic_OnDemandType_REQUEST_PRESENCE_CONFIG = 37,
+    meshtastic_OnDemandType_RESPONSE_PRESENCE_CONFIG = 38,
+    meshtastic_OnDemandType_REQUEST_SET_PRESENCE_CONFIG = 39
 } meshtastic_OnDemandType;
 
 typedef enum _meshtastic_LanStats_Link {
@@ -66,6 +76,13 @@ typedef enum _meshtastic_LanStats_Link {
     meshtastic_LanStats_Link_WIFI = 1,
     meshtastic_LanStats_Link_ETHERNET = 2
 } meshtastic_LanStats_Link;
+
+typedef enum _meshtastic_Presence_State {
+    /* Presence sharing is switched off on that node (PresenceConfig.enabled false). */
+    meshtastic_Presence_State_UNKNOWN = 0,
+    meshtastic_Presence_State_OFFLINE = 1,
+    meshtastic_Presence_State_ONLINE = 2
+} meshtastic_Presence_State;
 
 /* Struct definitions */
 typedef struct _meshtastic_FwPlusVersion {
@@ -292,6 +309,26 @@ typedef struct _meshtastic_LanStats {
     bool mqtt_connected;
 } meshtastic_LanStats;
 
+/* Whether this node's user is around: an API client (phone app, CLI, web client, ...) is attached to the
+ node. Sent unsolicited as RESPONSE_PRESENCE broadcasts on the primary channel while
+ PresenceConfig.enabled, and as the answer to REQUEST_PRESENCE. A broadcast goes out once the state has
+ held for 5 minutes and at least 30 minutes after the previous one, and only if it differs from what was
+ broadcast last, so a short Wi-Fi/BLE dropout sends nothing. After a boot the current state is broadcast
+ once it has held for 5 minutes. Neither the broadcasts nor the answers are offered to MQTT (ok_to_mqtt is
+ cleared, and this firmware never uplinks them). */
+typedef struct _meshtastic_Presence {
+    meshtastic_Presence_State state;
+    /* Seconds the node has been in `state` (since boot if it never changed). Only in answers to
+ REQUEST_PRESENCE, which report the state as it is at that moment, not the last broadcast one. */
+    bool has_secs_since_change;
+    uint32_t secs_since_change;
+} meshtastic_Presence;
+
+/* Switch for the Presence broadcasts and answers (see OnDemandType.REQUEST_PRESENCE_CONFIG below). */
+typedef struct _meshtastic_PresenceConfig {
+    bool enabled;
+} meshtastic_PresenceConfig;
+
 typedef struct _meshtastic_OnDemandRequest {
     meshtastic_OnDemandType request_type;
     /* Only present (and only consulted) when request_type == REQUEST_SET_NODE_STATS_BROADCAST_CONFIG. */
@@ -301,6 +338,9 @@ typedef struct _meshtastic_OnDemandRequest {
  Sets both broadcasts at once: read the current config first to change only one. */
     bool has_local_stats_broadcast_config;
     meshtastic_LocalStatsBroadcastConfig local_stats_broadcast_config;
+    /* Only present (and only consulted) when request_type == REQUEST_SET_PRESENCE_CONFIG. */
+    bool has_presence_config;
+    meshtastic_PresenceConfig presence_config;
 } meshtastic_OnDemandRequest;
 
 typedef struct _meshtastic_SnifferState {
@@ -325,6 +365,8 @@ typedef struct _meshtastic_OnDemandResponse {
         meshtastic_NodeStatsBroadcastConfig node_stats_broadcast_config;
         meshtastic_LocalStatsBroadcastConfig local_stats_broadcast_config;
         meshtastic_LanStats lan_stats;
+        meshtastic_Presence presence;
+        meshtastic_PresenceConfig presence_config;
     } response_data;
 } meshtastic_OnDemandResponse;
 
@@ -347,12 +389,16 @@ extern "C" {
 
 /* Helper constants for enums */
 #define _meshtastic_OnDemandType_MIN meshtastic_OnDemandType_UNKNOWN_TYPE
-#define _meshtastic_OnDemandType_MAX meshtastic_OnDemandType_RESPONSE_LAN_STATS
-#define _meshtastic_OnDemandType_ARRAYSIZE ((meshtastic_OnDemandType)(meshtastic_OnDemandType_RESPONSE_LAN_STATS+1))
+#define _meshtastic_OnDemandType_MAX meshtastic_OnDemandType_REQUEST_SET_PRESENCE_CONFIG
+#define _meshtastic_OnDemandType_ARRAYSIZE ((meshtastic_OnDemandType)(meshtastic_OnDemandType_REQUEST_SET_PRESENCE_CONFIG+1))
 
 #define _meshtastic_LanStats_Link_MIN meshtastic_LanStats_Link_NONE
 #define _meshtastic_LanStats_Link_MAX meshtastic_LanStats_Link_ETHERNET
 #define _meshtastic_LanStats_Link_ARRAYSIZE ((meshtastic_LanStats_Link)(meshtastic_LanStats_Link_ETHERNET+1))
+
+#define _meshtastic_Presence_State_MIN meshtastic_Presence_State_UNKNOWN
+#define _meshtastic_Presence_State_MAX meshtastic_Presence_State_ONLINE
+#define _meshtastic_Presence_State_ARRAYSIZE ((meshtastic_Presence_State)(meshtastic_Presence_State_ONLINE+1))
 
 
 
@@ -373,6 +419,9 @@ extern "C" {
 
 
 #define meshtastic_LanStats_link_ENUMTYPE meshtastic_LanStats_Link
+
+#define meshtastic_Presence_state_ENUMTYPE meshtastic_Presence_State
+
 
 #define meshtastic_OnDemandRequest_request_type_ENUMTYPE meshtastic_OnDemandType
 
@@ -401,7 +450,9 @@ extern "C" {
 #define meshtastic_NodeStatsBroadcastConfig_init_default {0, 0}
 #define meshtastic_LocalStatsBroadcastConfig_init_default {0, 0, 0, 0}
 #define meshtastic_LanStats_init_default         {false, 0, _meshtastic_LanStats_Link_MIN, 0, 0, 0}
-#define meshtastic_OnDemandRequest_init_default  {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_default, false, meshtastic_LocalStatsBroadcastConfig_init_default}
+#define meshtastic_Presence_init_default         {_meshtastic_Presence_State_MIN, false, 0}
+#define meshtastic_PresenceConfig_init_default   {0}
+#define meshtastic_OnDemandRequest_init_default  {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_default, false, meshtastic_LocalStatsBroadcastConfig_init_default, false, meshtastic_PresenceConfig_init_default}
 #define meshtastic_SnifferState_init_default     {0}
 #define meshtastic_OnDemandResponse_init_default {_meshtastic_OnDemandType_MIN, 0, {meshtastic_RxPacketHistory_init_default}}
 #define meshtastic_OnDemand_init_default         {false, 0, false, 0, 0, {meshtastic_OnDemandRequest_init_default}}
@@ -424,7 +475,9 @@ extern "C" {
 #define meshtastic_NodeStatsBroadcastConfig_init_zero {0, 0}
 #define meshtastic_LocalStatsBroadcastConfig_init_zero {0, 0, 0, 0}
 #define meshtastic_LanStats_init_zero            {false, 0, _meshtastic_LanStats_Link_MIN, 0, 0, 0}
-#define meshtastic_OnDemandRequest_init_zero     {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_zero, false, meshtastic_LocalStatsBroadcastConfig_init_zero}
+#define meshtastic_Presence_init_zero            {_meshtastic_Presence_State_MIN, false, 0}
+#define meshtastic_PresenceConfig_init_zero      {0}
+#define meshtastic_OnDemandRequest_init_zero     {_meshtastic_OnDemandType_MIN, false, meshtastic_NodeStatsBroadcastConfig_init_zero, false, meshtastic_LocalStatsBroadcastConfig_init_zero, false, meshtastic_PresenceConfig_init_zero}
 #define meshtastic_SnifferState_init_zero        {0}
 #define meshtastic_OnDemandResponse_init_zero    {_meshtastic_OnDemandType_MIN, 0, {meshtastic_RxPacketHistory_init_zero}}
 #define meshtastic_OnDemand_init_zero            {false, 0, false, 0, 0, {meshtastic_OnDemandRequest_init_zero}}
@@ -517,9 +570,13 @@ extern "C" {
 #define meshtastic_LanStats_udp_enabled_tag      3
 #define meshtastic_LanStats_mqtt_enabled_tag     4
 #define meshtastic_LanStats_mqtt_connected_tag   5
+#define meshtastic_Presence_state_tag            1
+#define meshtastic_Presence_secs_since_change_tag 2
+#define meshtastic_PresenceConfig_enabled_tag    1
 #define meshtastic_OnDemandRequest_request_type_tag 1
 #define meshtastic_OnDemandRequest_node_stats_broadcast_config_tag 2
 #define meshtastic_OnDemandRequest_local_stats_broadcast_config_tag 3
+#define meshtastic_OnDemandRequest_presence_config_tag 4
 #define meshtastic_SnifferState_enabled_tag      1
 #define meshtastic_OnDemandResponse_response_type_tag 1
 #define meshtastic_OnDemandResponse_rx_packet_history_tag 2
@@ -536,6 +593,8 @@ extern "C" {
 #define meshtastic_OnDemandResponse_node_stats_broadcast_config_tag 13
 #define meshtastic_OnDemandResponse_local_stats_broadcast_config_tag 14
 #define meshtastic_OnDemandResponse_lan_stats_tag 15
+#define meshtastic_OnDemandResponse_presence_tag 16
+#define meshtastic_OnDemandResponse_presence_config_tag 17
 #define meshtastic_OnDemand_packet_index_tag     1
 #define meshtastic_OnDemand_packet_total_tag     2
 #define meshtastic_OnDemand_request_tag          3
@@ -710,14 +769,27 @@ X(a, STATIC,   SINGULAR, BOOL,     mqtt_connected,    5)
 #define meshtastic_LanStats_CALLBACK NULL
 #define meshtastic_LanStats_DEFAULT NULL
 
+#define meshtastic_Presence_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, UENUM,    state,             1) \
+X(a, STATIC,   OPTIONAL, UINT32,   secs_since_change,   2)
+#define meshtastic_Presence_CALLBACK NULL
+#define meshtastic_Presence_DEFAULT NULL
+
+#define meshtastic_PresenceConfig_FIELDLIST(X, a) \
+X(a, STATIC,   SINGULAR, BOOL,     enabled,           1)
+#define meshtastic_PresenceConfig_CALLBACK NULL
+#define meshtastic_PresenceConfig_DEFAULT NULL
+
 #define meshtastic_OnDemandRequest_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UENUM,    request_type,      1) \
 X(a, STATIC,   OPTIONAL, MESSAGE,  node_stats_broadcast_config,   2) \
-X(a, STATIC,   OPTIONAL, MESSAGE,  local_stats_broadcast_config,   3)
+X(a, STATIC,   OPTIONAL, MESSAGE,  local_stats_broadcast_config,   3) \
+X(a, STATIC,   OPTIONAL, MESSAGE,  presence_config,   4)
 #define meshtastic_OnDemandRequest_CALLBACK NULL
 #define meshtastic_OnDemandRequest_DEFAULT NULL
 #define meshtastic_OnDemandRequest_node_stats_broadcast_config_MSGTYPE meshtastic_NodeStatsBroadcastConfig
 #define meshtastic_OnDemandRequest_local_stats_broadcast_config_MSGTYPE meshtastic_LocalStatsBroadcastConfig
+#define meshtastic_OnDemandRequest_presence_config_MSGTYPE meshtastic_PresenceConfig
 
 #define meshtastic_SnifferState_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, BOOL,     enabled,           1)
@@ -739,7 +811,9 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,routing_errors,response_data.r
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,sniffer_state,response_data.sniffer_state),  12) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,node_stats_broadcast_config,response_data.node_stats_broadcast_config),  13) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,local_stats_broadcast_config,response_data.local_stats_broadcast_config),  14) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,lan_stats,response_data.lan_stats),  15)
+X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,lan_stats,response_data.lan_stats),  15) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,presence,response_data.presence),  16) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,presence_config,response_data.presence_config),  17)
 #define meshtastic_OnDemandResponse_CALLBACK NULL
 #define meshtastic_OnDemandResponse_DEFAULT NULL
 #define meshtastic_OnDemandResponse_response_data_rx_packet_history_MSGTYPE meshtastic_RxPacketHistory
@@ -756,6 +830,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (response_data,lan_stats,response_data.lan_st
 #define meshtastic_OnDemandResponse_response_data_node_stats_broadcast_config_MSGTYPE meshtastic_NodeStatsBroadcastConfig
 #define meshtastic_OnDemandResponse_response_data_local_stats_broadcast_config_MSGTYPE meshtastic_LocalStatsBroadcastConfig
 #define meshtastic_OnDemandResponse_response_data_lan_stats_MSGTYPE meshtastic_LanStats
+#define meshtastic_OnDemandResponse_response_data_presence_MSGTYPE meshtastic_Presence
+#define meshtastic_OnDemandResponse_response_data_presence_config_MSGTYPE meshtastic_PresenceConfig
 
 #define meshtastic_OnDemand_FIELDLIST(X, a) \
 X(a, STATIC,   OPTIONAL, UINT32,   packet_index,      1) \
@@ -786,6 +862,8 @@ extern const pb_msgdesc_t meshtastic_Ping_msg;
 extern const pb_msgdesc_t meshtastic_NodeStatsBroadcastConfig_msg;
 extern const pb_msgdesc_t meshtastic_LocalStatsBroadcastConfig_msg;
 extern const pb_msgdesc_t meshtastic_LanStats_msg;
+extern const pb_msgdesc_t meshtastic_Presence_msg;
+extern const pb_msgdesc_t meshtastic_PresenceConfig_msg;
 extern const pb_msgdesc_t meshtastic_OnDemandRequest_msg;
 extern const pb_msgdesc_t meshtastic_SnifferState_msg;
 extern const pb_msgdesc_t meshtastic_OnDemandResponse_msg;
@@ -811,6 +889,8 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_NodeStatsBroadcastConfig_fields &meshtastic_NodeStatsBroadcastConfig_msg
 #define meshtastic_LocalStatsBroadcastConfig_fields &meshtastic_LocalStatsBroadcastConfig_msg
 #define meshtastic_LanStats_fields &meshtastic_LanStats_msg
+#define meshtastic_Presence_fields &meshtastic_Presence_msg
+#define meshtastic_PresenceConfig_fields &meshtastic_PresenceConfig_msg
 #define meshtastic_OnDemandRequest_fields &meshtastic_OnDemandRequest_msg
 #define meshtastic_SnifferState_fields &meshtastic_SnifferState_msg
 #define meshtastic_OnDemandResponse_fields &meshtastic_OnDemandResponse_msg
@@ -830,12 +910,14 @@ extern const pb_msgdesc_t meshtastic_OnDemand_msg;
 #define meshtastic_NodeStatsBroadcastConfig_size 8
 #define meshtastic_NodeStats_size                265
 #define meshtastic_NodesList_size                710
-#define meshtastic_OnDemandRequest_size          30
+#define meshtastic_OnDemandRequest_size          34
 #define meshtastic_OnDemandResponse_size         715
 #define meshtastic_OnDemand_size                 724
 #define meshtastic_Ping_size                     22
 #define meshtastic_PortCounterEntry_size         12
 #define meshtastic_PortCountersHistory_size      280
+#define meshtastic_PresenceConfig_size           2
+#define meshtastic_Presence_size                 8
 #define meshtastic_RoutingErrorEntry_size        12
 #define meshtastic_RoutingErrorsHistory_size     560
 #define meshtastic_RxAvgTimeHistory_size         240
