@@ -41,7 +41,7 @@ static const size_t MAX_PACKET_SIZE = 190;
 // the app can tell (via REQUEST_FW_PLUS_VERSION) whether the connected node supports it. 3 = adds
 // REQUEST_(SET_)LOCAL_STATS_BROADCAST_CONFIG, 4 = adds REQUEST_LAN_STATS, 5 = adds presence
 // (REQUEST_PRESENCE, REQUEST_(SET_)PRESENCE_CONFIG and the RESPONSE_PRESENCE broadcasts).
-#define FW_PLUS_VERSION 5
+#define FW_PLUS_VERSION 4
 
 static constexpr uint16_t TX_HISTORY_KEY_ONDEMAND_NODE_STATS = 0x8006;
 // A configured interval below this floor is clamped up - mirrors min_default_telemetry_interval_secs'

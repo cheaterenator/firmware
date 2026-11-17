@@ -3,6 +3,7 @@
 #include "buzz/BuzzerFeedbackThread.h"
 #include "modules/SystemCommandsModule.h"
 #endif
+#include "modules/LoRaActivityLED.h"
 #include "modules/StatusLEDModule.h"
 #if !MESHTASTIC_EXCLUDE_REPLYBOT
 #include "ReplyBotModule.h"
@@ -171,6 +172,9 @@ void setupModules()
     }
 #endif
     statusLEDModule = new StatusLEDModule();
+#ifdef NEOPIXEL_LORA_PIN
+    loraActivityLED = new LoRaActivityLED();
+#endif
 #if !MESHTASTIC_EXCLUDE_REPLYBOT
     new ReplyBotModule();
 #endif

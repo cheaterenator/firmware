@@ -151,6 +151,8 @@ class RadioInterface
 
     /// Fires once per valid received LoRa packet (arg = sender NodeNum). Used e.g. to flash LED_LORA.
     static Observable<uint32_t> loraRxPacketObservable;
+    /// Fires true when a LoRa transmission starts and false when it ends. Used e.g. by NEOPIXEL_LORA_PIN.
+    static Observable<bool> loraTxObservable;
 
     /**
      * Coerce LoRa config fields (bandwidth/spread_factor) derived from presets.

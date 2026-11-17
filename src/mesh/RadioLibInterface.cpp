@@ -805,8 +805,12 @@ meshtastic_MeshPacket *RadioLibInterface::detachSentPacket()
 #endif
     // Keep this behind `if (p)`: completeSending() also runs on every setStandby(), where a hook
     // undoing its own pre-TX switch would recurse back through reconfigure().
-    if (p)
+    if (p) {
         RadioTxHooks::packetReleased(this, p);
+#ifdef NEOPIXEL_LORA_PIN
+        loraTxObservable.notifyObservers(false);
+#endif
+    }
     return p;
 }
 
@@ -1009,7 +1013,7 @@ void RadioLibInterface::handleReceiveInterrupt(const CapturedRxInfo *captured)
 
             printPacket("Lora RX", mp);
 
-#ifdef LED_LORA
+#if defined(LED_LORA) || defined(NEOPIXEL_LORA_PIN)
             loraRxPacketObservable.notifyObservers(mp->from);
 #endif
 
@@ -1713,6 +1717,9 @@ bool RadioLibInterface::startSend(meshtastic_MeshPacket *txp)
             printPacket("Started Tx", txp);
 #ifdef LED_LORA
             digitalWrite(LED_LORA, LED_STATE_ON);
+#endif
+#ifdef NEOPIXEL_LORA_PIN
+            loraTxObservable.notifyObservers(true);
 #endif
         }
 
