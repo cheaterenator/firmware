@@ -41,11 +41,20 @@ EDITS = [
     ),
     (
         "source/graphics/driver/X11Driver.cpp",
-        "    display = lv_x11_window_create(title, screenWidth, screenHeight);\n"
-        "    lv_x11_inputs_create(display, &mouse_cursor_icon);\n",
+        "    display = lv_x11_window_create(title, screenWidth, screenHeight);\n",
         "#ifdef USE_SDL\n"
         "    display = lv_sdl_window_create(screenWidth, screenHeight);\n"
-        "    lv_sdl_window_set_title(display, title);\n"
+        "    if (display)\n"
+        "        lv_sdl_window_set_title(display, title);\n"
+        "#else\n"
+        "    display = lv_x11_window_create(title, screenWidth, screenHeight);\n"
+        "#endif\n",
+    ),
+    (
+        # after the frame-observer flush wrap, which the SDL display gets too
+        "source/graphics/driver/X11Driver.cpp",
+        "    lv_x11_inputs_create(display, &mouse_cursor_icon);\n",
+        "#ifdef USE_SDL\n"
         "    lv_sdl_mouse_create();\n"
         "    lv_sdl_mousewheel_create();\n"
         "    // device-ui puts only the keyboards it drives itself (I2C, libinput) in a group, and a\n"
@@ -58,7 +67,6 @@ EDITS = [
         "    }\n"
         "    lv_indev_set_group(lv_sdl_keyboard_create(), group);\n"
         "#else\n"
-        "    display = lv_x11_window_create(title, screenWidth, screenHeight);\n"
         "    lv_x11_inputs_create(display, &mouse_cursor_icon);\n"
         "#endif\n",
     ),
